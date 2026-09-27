@@ -23,6 +23,7 @@ import { fixRectToFit, mapKonvaBrightness } from "../../utils/image";
 import { FF_DEV_1442, FF_LSDV_4930, FF_ZOOM_OPTIM, isFF } from "../../utils/feature-flags";
 import { Pagination } from "../../common/Pagination/Pagination";
 import { Image } from "./Image";
+import { SkeletonRelationsLayer } from "./SkeletonRelationsLayer";
 
 Konva.showWarnings = false;
 
@@ -1420,6 +1421,8 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
       {item.grid && item.sizeUpdated && <ImageGrid item={item} />}
 
       {isFF(FF_LSDV_4930) ? <TransformerBack item={item} /> : null}
+
+      <SkeletonRelationsLayer item={item} />
 
       {renderableRegions.map(([groupName, list]) => {
         const useLayers = groupName.match(/brush/i) === null;

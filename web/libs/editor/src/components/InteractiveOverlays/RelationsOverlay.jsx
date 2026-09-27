@@ -238,6 +238,15 @@ class RelationsOverlay extends PureComponent {
 
   renderRelations(relations, visible, hasHighlight, highlightedRelation) {
     return relations.map((relation) => {
+      // Keypoint-to-keypoint ("skeleton") relations are rendered by
+      // SkeletonRelationsLayer directly inside the Konva Stage, in lockstep
+      // with the points' own reactive coordinates (no DOM measurement, no
+      // debounce lag during pan/zoom). Skip them here to avoid a laggy
+      // duplicate trailing behind the fast one.
+      if (relation.node1?.type === "keypointregion" && relation.node2?.type === "keypointregion") {
+        return null;
+      }
+
       const highlighted = highlightedRelation === relation;
 
       return (
