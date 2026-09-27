@@ -180,6 +180,18 @@ const HtxKeyPointView = ({ item, setShapeRef }) => {
           }
           item.annotation.history.freeze(item.id);
         }}
+        onDragMove={(e) => {
+          // Keep the MST model's x/y (and therefore canvasX/canvasY, which
+          // SkeletonRelationsLayer reads to draw connecting lines) in sync
+          // on every drag frame, not just on release. Without this, Konva
+          // moves the <Circle> itself locally during the drag gesture, but
+          // the model coordinates only update in onDragEnd — so any line
+          // drawn from those coordinates visibly lags a full drag behind
+          // the point until the mouse button is released.
+          const t = e.target;
+
+          item.setPosition(t.getAttr("x"), t.getAttr("y"));
+        }}
         onDragEnd={(e) => {
           const t = e.target;
 
