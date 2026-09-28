@@ -801,7 +801,7 @@ export default observer(
           y: item.zoomingPositionY + e.evt.movementY,
         };
 
-        item.setZoomPosition(newPos.x, newPos.y);
+        item.userSetZoomPosition(newPos.x, newPos.y);
       } else {
         item.event("mousemove", e, e.evt.offsetX, e.evt.offsetY);
       }
@@ -905,7 +905,7 @@ export default observer(
         if (withinX && scrollingX) e.evt.preventDefault();
         if (withinY && scrollingY) e.evt.preventDefault();
 
-        item.setZoomPosition(newPos.x, newPos.y);
+        item.userSetZoomPosition(newPos.x, newPos.y);
       }
     };
 
@@ -1093,6 +1093,7 @@ export default observer(
             <div
               ref={(node) => {
                 this.filler = node;
+                item.setFillerRef?.(node);
               }}
               className={styles.filler}
               style={{ width: "100%", marginTop: item.fillerHeight }}
@@ -1157,7 +1158,12 @@ export default observer(
             ) : null}
           </div>
 
-          {toolsReady && imageIsLoaded && this.renderTools()}
+          {/*
+            Render the toolbar before the image is loaded: it takes horizontal space next to the
+            container, and appearing together with the image it shrank the container after the
+            view had been computed, so the image was drawn once and then jumped sideways.
+          */}
+          {toolsReady && this.renderTools()}
           {item.images.length > 1 && (
             <div className={styles.gallery}>
               {item.images.map((src, i) => (
@@ -1251,11 +1257,20 @@ const ImageLayer = observer(({ item }) => {
   const currentSrc = imageEntity?.currentSrc;
   const [loadedImage, setLoadedImage] = useState(null);
 
+  // The hidden <img> of the Image component is already loaded and decoded when the stage is shown;
+  // draw from it right away instead of waiting for a second load of the same source.
+  const domImage = item.imageRef;
+  const readyDomImage =
+    domImage?.complete && domImage.naturalWidth > 0 && currentSrc && domImage.src === currentSrc ? domImage : null;
+  const image = readyDomImage ?? loadedImage;
+
   useEffect(() => {
     if (!imageEntity?.downloaded || !currentSrc) {
       setLoadedImage(null);
       return;
     }
+
+    if (readyDomImage) return;
 
     let cancelled = false;
     const img = new window.Image();
@@ -1273,7 +1288,7 @@ const ImageLayer = observer(({ item }) => {
     return () => {
       cancelled = true;
     };
-  }, [imageEntity?.downloaded, currentSrc, item.imageCrossOrigin]);
+  }, [imageEntity?.downloaded, currentSrc, item.imageCrossOrigin, readyDomImage]);
 
   const { width, height } = useMemo(() => {
     return {
@@ -1287,7 +1302,7 @@ const ImageLayer = observer(({ item }) => {
 
   useEffect(() => {
     const node = konvaImageRef.current;
-    if (node && loadedImage) {
+    if (node && image) {
       try {
         // Force Konva cache reset and redraw when source/filters change.
         node.clearCache();
@@ -1302,14 +1317,14 @@ const ImageLayer = observer(({ item }) => {
       }
       node.getLayer()?.batchDraw();
     }
-  }, [loadedImage, brightness, contrast, currentSrc]);
+  }, [image, brightness, contrast, currentSrc]);
 
-  return loadedImage ? (
+  return image ? (
     <Layer imageSmoothingEnabled={item.smoothingEnabled} scale={{ x: item.stageZoom, y: item.stageZoom }}>
       <KonvaImage
         key={currentSrc ?? "image-source"}
         ref={konvaImageRef}
-        image={loadedImage}
+        image={image}
         width={width}
         height={height}
         listening={false}

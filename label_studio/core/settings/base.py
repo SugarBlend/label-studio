@@ -552,6 +552,8 @@ TASK_LOCK_TTL = int(get_env('TASK_LOCK_TTL', default=86400))
 LABEL_STREAM_HISTORY_LIMIT = int(get_env('LABEL_STREAM_HISTORY_LIMIT', default=100))
 
 RANDOM_NEXT_TASK_SAMPLE_SIZE = int(get_env('RANDOM_NEXT_TASK_SAMPLE_SIZE', 50))
+# How many upcoming tasks the next-task API suggests for image prefetch in the label stream (0 disables)
+NEXT_TASK_PREFETCH_HINT = int(get_env('NEXT_TASK_PREFETCH_HINT', 3))
 
 TASK_API_PAGE_SIZE_MAX = int(get_env('TASK_API_PAGE_SIZE_MAX', 0)) or None
 

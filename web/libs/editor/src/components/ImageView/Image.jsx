@@ -109,13 +109,27 @@ const ImageRenderer = observer(
       return {
         ...style,
         maxWidth: "unset",
-        visibility: isLoaded ? "visible" : "hidden",
+        // The picture is drawn by the Konva ImageLayer; this <img> only provides the source
+        // (natural size, readiness, pixels for Magic Wand). `clip` above has no effect on a
+        // non-absolutely positioned element, so without hiding it the <img> was visible under
+        // the canvas. It is positioned without the stage alignment offset, so while the Konva
+        // layer was still loading the image, a shifted copy was shown and then "jumped" into place.
+        visibility: "hidden",
       };
-    }, [imageTransform, isLoaded]);
+    }, [imageTransform]);
 
     return (
-      // biome-ignore lint/a11y/noRedundantAlt: alt="image" is intentional for accessibility
-      <img {...imgDefaultProps} ref={ref} alt="image" src={src} onLoad={onLoad} onError={onError} style={imageStyles} />
+      <img
+        {...imgDefaultProps}
+        ref={ref}
+        // biome-ignore lint/a11y/noRedundantAlt: alt="image" is intentional for accessibility
+        alt="image"
+        src={src}
+        onLoad={onLoad}
+        onError={onError}
+        style={imageStyles}
+        data-loaded={isLoaded ? "true" : "false"}
+      />
     );
   }),
 );

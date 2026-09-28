@@ -25,6 +25,16 @@ import { ImageEntityMixin } from "./ImageEntityMixin";
 import { ImageSelection } from "./ImageSelection";
 import { RELATIVE_STAGE_HEIGHT, RELATIVE_STAGE_WIDTH, SNAP_TO_PIXEL_MODE } from "../../../components/ImageView/Image";
 import MultiItemObjectBase from "../MultiItemObjectBase";
+import {
+  canRestoreZoom,
+  getHeldZoom,
+  holdRestoredZoom,
+  isZoomReady,
+  markZoomReady,
+  recallZoom,
+  releaseHeldZoom,
+  rememberZoom,
+} from "./zoomMemory";
 
 const IMAGE_PRELOAD_COUNT = 3;
 const ZOOM_INTENSITY = 0.009;
@@ -186,6 +196,8 @@ const Model = types
   .volatile(() => ({
     currentImage: undefined,
     supportSuggestions: true,
+    /** Filler element that defines the container height (see ImageView) */
+    fillerRef: null,
   }))
   .views((self) => ({
     get store() {
@@ -884,6 +896,9 @@ const Model = types
           naturalHeight: self.naturalHeight,
         });
       }
+
+      // stage size is recalculated only here, so save the final view state again
+      self.rememberZoomState();
     },
 
     setZoomPosition(x, y) {
@@ -898,6 +913,62 @@ const Model = types
 
       self.zoomingPositionX = clamp(x, minX, 0);
       self.zoomingPositionY = clamp(y, minY, 0);
+
+      self.rememberZoomState();
+    },
+
+    /** Size of the visible area the stage is positioned in (same as in setZoomPosition) */
+    getViewportSize() {
+      return isFF(FF_DEV_3377)
+        ? [self.canvasSize.width, self.canvasSize.height]
+        : [self.containerWidth, self.containerHeight];
+    },
+
+    /**
+     * Save current zoom and position, so the next task with an image of the same size
+     * opens with the same view. Position is stored as the image point in the viewport center.
+     */
+    rememberZoomState() {
+      if (!isZoomReady(self) || !getRoot(self).settings?.preserveZoom) return;
+      // layout is still settling after a restore: keep the saved state as is
+      if (getHeldZoom(self)) return;
+
+      const [width, height] = self.getViewportSize();
+      const stageWidth = self.stageComponentSize.width * self.zoomScale;
+      const stageHeight = self.stageComponentSize.height * self.zoomScale;
+
+      if (!stageWidth || !stageHeight) return;
+
+      rememberZoom(self.name, {
+        naturalWidth: self.naturalWidth,
+        naturalHeight: self.naturalHeight,
+        zoom: self.currentZoom,
+        fx: (width / 2 - self.zoomingPositionX) / stageWidth,
+        fy: (height / 2 - self.zoomingPositionY) / stageHeight,
+      });
+    },
+
+    /** Pan initiated by the user (drag, scroll, zoom tool) */
+    userSetZoomPosition(x, y) {
+      releaseHeldZoom(self);
+      self.setZoomPosition(x, y);
+    },
+
+    /** Apply zoom and position saved by rememberZoomState */
+    restoreZoomState(state) {
+      self.setZoom(state.zoom);
+      self.updateImageAfterZoom();
+
+      const [width, height] = self.getViewportSize();
+      const stageWidth = self.stageComponentSize.width * self.zoomScale;
+      const stageHeight = self.stageComponentSize.height * self.zoomScale;
+
+      if (stageWidth <= width && stageHeight <= height) {
+        // image fits into the viewport: keep it centered like default zoom does
+        self.resetZoomPositionToCenter();
+      } else {
+        self.setZoomPosition(width / 2 - state.fx * stageWidth, height / 2 - state.fy * stageHeight);
+      }
     },
 
     resetZoomPositionToCenter() {
@@ -912,6 +983,7 @@ const Model = types
     },
 
     sizeToFit() {
+      releaseHeldZoom(self);
       const { maxScale } = self;
 
       self.defaultzoom = "fit";
@@ -921,6 +993,7 @@ const Model = types
     },
 
     sizeToOriginal() {
+      releaseHeldZoom(self);
       const { maxScale } = self;
 
       self.defaultzoom = "original";
@@ -930,6 +1003,7 @@ const Model = types
     },
 
     sizeToAuto() {
+      releaseHeldZoom(self);
       self.defaultzoom = "auto";
       self.setZoom(1);
       self.updateImageAfterZoom();
@@ -972,6 +1046,8 @@ const Model = types
       isEvent = false,
     ) {
       if (val) {
+        releaseHeldZoom(self);
+
         const zoomScale = isEvent
           ? self.getInertialZoom(val)
           : val > 0
@@ -1030,6 +1106,10 @@ const Model = types
 
     setContainerRef(ref) {
       self.containerRef = ref;
+    },
+
+    setFillerRef(ref) {
+      self.fillerRef = ref;
     },
 
     setStageRef(ref) {
@@ -1154,10 +1234,21 @@ const Model = types
 
     updateImageSize(ev) {
       const { naturalWidth, naturalHeight } = self.imageRef ?? ev.target;
-      const { offsetWidth, offsetHeight } = self.containerRef;
 
       self.naturalWidth = naturalWidth;
       self.naturalHeight = naturalHeight;
+
+      // Container height is defined by the filler (a percentage of the width based on the image
+      // aspect ratio), which React updates only after this action. Apply the same value right away,
+      // so the sizes below are the final ones and the view doesn't jump on the next resize.
+      if (self.fillerRef?.style) {
+        self.fillerRef.style.marginTop = self.fillerHeight;
+      }
+
+      const { offsetWidth, offsetHeight } = self.containerRef;
+
+      // zoom of the previous task (read before default sizing overwrites it)
+      const savedZoom = getRoot(self).settings?.preserveZoom ? recallZoom(self.name) : null;
 
       self._updateImageSize({ width: offsetWidth, height: offsetHeight });
       // after regions' sizes adjustment we have to reset all saved history changes
@@ -1169,6 +1260,15 @@ const Model = types
         self.sizeToFit();
       } else {
         self.sizeToAuto();
+      }
+
+      markZoomReady(self);
+
+      if (canRestoreZoom(savedZoom, naturalWidth, naturalHeight)) {
+        holdRestoredZoom(self, savedZoom);
+        self.restoreZoomState(savedZoom);
+      } else {
+        self.rememberZoomState();
       }
       // Don't force unselection of regions during the updateObjects callback from history reinit
       setTimeout(() => self.annotation?.reinitHistory(false), 0);
@@ -1196,6 +1296,10 @@ const Model = types
      */
     onResize(width, height, userResize) {
       self._updateImageSize({ width, height, userResize });
+
+      // right after a restore: re-apply exactly the restored view for the final layout
+      const heldZoom = getHeldZoom(self);
+      if (heldZoom) self.restoreZoomState(heldZoom);
     },
 
     event(name, ev, screenX, screenY) {

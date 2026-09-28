@@ -94,4 +94,14 @@ export default {
     onChangeEvent: "toggleInvertedZoom",
     defaultValue: false,
   },
+  preserveZoom: {
+    newUI: {
+      tags: "Image Tag",
+      title: "Keep zoom between tasks",
+      description: "Keep zoom level and position when switching to a task with an image of the same size",
+    },
+    description: "Keep zoom between tasks",
+    onChangeEvent: "togglePreserveZoom",
+    defaultValue: true,
+  },
 };

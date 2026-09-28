@@ -1,3 +1,4 @@
+import copy
 import logging
 from collections import Counter
 from typing import List, Tuple, Union
@@ -8,9 +9,10 @@ from core.utils.db import fast_first
 from django.conf import settings
 from django.db.models import Case, Count, Exists, F, Max, OuterRef, Q, QuerySet, When
 from django.db.models.fields import DecimalField
+from django.utils import timezone
 from projects.functions.stream_history import add_stream_history
 from projects.models import Project
-from tasks.models import Annotation, Task
+from tasks.models import Annotation, Task, TaskLock
 from users.models import User
 
 logger = logging.getLogger(__name__)
@@ -533,3 +535,51 @@ def get_next_task(
 
         add_stream_history(next_task, user, project)
         return next_task, queue_info
+
+
+def get_upcoming_tasks_hint(
+    user: User,
+    prepared_tasks: QuerySet,
+    project: Project,
+    dm_queue: Union[bool, None],
+    current_task: Union[Task, None],
+    limit: Union[int, None] = None,
+) -> List[dict]:
+    """Best-effort list of tasks likely to be served to the user after `current_task`.
+
+    Used by the label stream to prefetch images of upcoming tasks in the browser,
+    so switching to them is instant. No locks are taken and nothing is changed:
+    it only reads the same "not solved" queryset in the same order that sequential
+    / Data Manager queue sampling uses. For random or uncertainty sampling the next
+    task can't be predicted, so the hint is empty. If the real next task differs,
+    the client just loads it as usual.
+
+    :return: [{"id": <task id>, "data": <task data with resolved storage URLs>}, ...]
+    """
+    limit = getattr(settings, 'NEXT_TASK_PREFETCH_HINT', 3) if limit is None else limit
+    if not limit or current_task is None:
+        return []
+    if not dm_queue and project.sampling != project.SEQUENCE:
+        return []
+
+    try:
+        not_solved_tasks, _, _, _ = get_not_solved_tasks_qs(user, project, prepared_tasks, None, '')
+
+        # tasks currently taken by other annotators are most likely not served next
+        locked_by_others = TaskLock.objects.filter(task=OuterRef('pk'), expire_at__gt=timezone.now()).exclude(
+            user=user
+        )
+        candidates = (
+            not_solved_tasks.exclude(pk=current_task.pk)
+            .exclude(Exists(locked_by_others))
+            .only('id', 'data', 'project_id')[:limit]
+        )
+
+        hint = []
+        for task in candidates:
+            data = task.resolve_uri(copy.deepcopy(task.data), project)
+            hint.append({'id': task.id, 'data': data})
+        return hint
+    except Exception as exc:  # never break next task serving because of a hint
+        logger.debug(f'Failed to build upcoming tasks hint for user={user}: {exc}', exc_info=True)
+        return []

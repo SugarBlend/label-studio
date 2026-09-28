@@ -18,6 +18,14 @@ import { when, runInAction } from "mobx";
 import { isAlive } from "mobx-state-tree";
 import { imageCache } from "@humansignal/core";
 import { invalidateAnnotationCache, invalidateDistributionCache } from "@humansignal/core/lib/utils/annotation-cache";
+import {
+  areTaskImagesReady,
+  cancelPrefetch,
+  isInstantSwitchEnabled,
+  isTaskDataReady,
+  prefetchLabelStreamTasks,
+  prefetchNeighbourTasks,
+} from "./task-prefetch";
 
 const waitForPaint = () =>
   new Promise((resolve) => {
@@ -325,7 +333,13 @@ export class LSFWrapper {
     const nextAction = async () => {
       const tasks = this.datamanager.store.taskStore;
 
-      const newTask = await this.withinLoadingState(async () => {
+      // Task data is already prefetched: no need to show the loader while "loading" it
+      const instantLoad = !this.labelStream && isDefined(taskID) && isInstantSwitchEnabled() && isTaskDataReady(taskID);
+      const loadWrapper = instantLoad
+        ? (callback) => callback.call(this)
+        : (callback) => this.withinLoadingState(callback);
+
+      const newTask = await loadWrapper(async () => {
         let nextTask;
 
         if (!isDefined(taskID)) {
@@ -392,10 +406,16 @@ export class LSFWrapper {
 
     const hasChangedTasks = this.lsf?.task?.id !== task?.id && task?.id;
 
-    this.setLoading(true, hasChangedTasks);
+    // Everything for this task is already in memory (prefetched): swap tasks in place,
+    // without replacing the editor with a loader and waiting for it to paint.
+    const instantSwitch = isInstantSwitchEnabled() && areTaskImagesReady(task);
 
-    // Let the browser paint the loading indicator before heavy store operations
-    await waitForPaint();
+    if (!instantSwitch) {
+      this.setLoading(true, hasChangedTasks);
+
+      // Let the browser paint the loading indicator before heavy store operations
+      await waitForPaint();
+    }
 
     if (!this.lsf) return;
 
@@ -456,6 +476,18 @@ export class LSFWrapper {
 
     await this.setAnnotation(annotationID, fromHistory || isRejectedQueue, selectPrediction);
     this.setLoading(false);
+
+    // Prefetch upcoming tasks so switching to them is instant.
+    // Every navigation path (DM quick view, prev/next buttons, history, label stream) ends here.
+    // Started after the current task is set up, so its own images are requested first.
+    if (task) {
+      if (this.labelStream) {
+        // the server picks the next task; prefetch images of the tasks it hinted at
+        waitForPaint().then(() => prefetchLabelStreamTasks(task));
+      } else {
+        waitForPaint().then(() => prefetchNeighbourTasks(this.datamanager?.store?.taskStore, task));
+      }
+    }
 
     if (isFF(FF_FIT_1304_STRICT_OVERLAP) && this.overlapReached) {
       this.showOverlapReachedMessage();
@@ -1424,10 +1456,50 @@ export class LSFWrapper {
 
   /** @private */
   setLoading(isLoading, shouldReset = false) {
+    // Label stream with instant switching: while submitting / fetching the next task keep the
+    // current task on screen (frozen) instead of replacing the whole editor with a loader, so
+    // the next task (with prefetched images) replaces it directly.
+    if (this.labelStream && isInstantSwitchEnabled() && this.lsf?.task) {
+      if (this.lsf.isLoading) this.lsf.setFlags({ isLoading: false });
+      this.setFrozen(isLoading);
+      return;
+    }
+
+    this.setFrozen(false);
     if (isFF(FF_LSDV_4620_3_ML) && shouldReset) this.lsf.clearApp();
     this.lsf.setFlags({ isLoading });
     if (isFF(FF_LSDV_4620_3_ML) && shouldReset) this.lsf.renderApp();
   }
+
+  /**
+   * Block user input in the labeling UI without hiding it (see setLoading).
+   * Pointer and focus are blocked with `inert`, keyboard hotkeys with a capturing listener.
+   * @private
+   */
+  setFrozen(frozen) {
+    const root = this.root;
+
+    if (!root || !!this.frozen === !!frozen) return;
+    this.frozen = !!frozen;
+
+    if (frozen) {
+      root.setAttribute("inert", "");
+      root.style.cursor = "progress";
+      window.addEventListener("keydown", this.blockKeyboard, true);
+      window.addEventListener("keyup", this.blockKeyboard, true);
+    } else {
+      root.removeAttribute("inert");
+      root.style.cursor = "";
+      window.removeEventListener("keydown", this.blockKeyboard, true);
+      window.removeEventListener("keyup", this.blockKeyboard, true);
+    }
+  }
+
+  /** @private */
+  blockKeyboard = (event) => {
+    event.stopImmediatePropagation();
+    event.preventDefault();
+  };
 
   async withinLoadingState(callback) {
     let result;
@@ -1442,6 +1514,9 @@ export class LSFWrapper {
   }
 
   destroy() {
+    cancelPrefetch();
+    this.setFrozen(false);
+
     // Clean up overlap error event listeners and dismiss toast (only when feature flag is enabled)
     if (isFF(FF_FIT_1304_STRICT_OVERLAP)) {
       window.removeEventListener("overlap-error-next-task", this.handleOverlapNextTask);

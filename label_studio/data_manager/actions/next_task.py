@@ -5,7 +5,7 @@ import logging
 from core.permissions import all_permissions
 from data_manager.actions import DataManagerAction
 from data_manager.functions import filters_ordering_selected_items_exist
-from projects.functions.next_task import get_next_task
+from projects.functions.next_task import get_next_task, get_upcoming_tasks_hint
 from rest_framework.exceptions import NotFound
 from tasks.serializers import NextTaskSerializer
 
@@ -32,6 +32,8 @@ def next_task(project, queryset, **kwargs):
     serializer = NextTaskSerializer(next_task, context=context)
     response = serializer.data
     response['queue'] = queue_info
+    # upcoming tasks for client-side image prefetch (label stream)
+    response['prefetch_hint'] = get_upcoming_tasks_hint(request.user, queryset, project, dm_queue, next_task)
     return response
 
 

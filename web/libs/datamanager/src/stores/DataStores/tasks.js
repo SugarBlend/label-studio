@@ -7,6 +7,7 @@ import { DynamicModel, registerModel } from "../DynamicModel";
 import { CustomJSON } from "../types";
 import { FF_DEV_2536, FF_DISABLE_GLOBAL_USER_FETCHING, FF_LOPS_E_3, isFF } from "../../utils/feature-flags";
 import { isActive, FF_FIT_720_LAZY_LOAD_ANNOTATIONS } from "@humansignal/core/lib/utils/feature-flags";
+import { prefetchTaskData, takeLabelStreamHint, takePrefetchedTaskData } from "../../sdk/task-prefetch";
 
 const SIMILARITY_UPPER_LIMIT_PRECISION = 1000;
 const fileAttributes = types.model({
@@ -148,14 +149,7 @@ export const create = (columns) => {
           annotationId: task.annotationId?.toString(),
         }));
       }),
-      loadTask: flow(function* (taskID, { select = true } = {}) {
-        if (!isDefined(taskID)) {
-          console.warn("Task ID must be provided");
-          return;
-        }
-
-        self.setLoading(taskID);
-
+      getTaskParams(taskID) {
         // Pass label stream mode context to the backend API call
         const isLabelStream = getRoot(self).SDK?.mode === "labelstream";
         const taskParams = { taskID };
@@ -167,8 +161,39 @@ export const create = (columns) => {
         if (isActive(FF_FIT_720_LAZY_LOAD_ANNOTATIONS)) {
           taskParams.annotations_stub = true;
         }
+        return taskParams;
+      },
 
-        const taskData = yield self.root.apiCall("task", taskParams);
+      /**
+       * Fetch task data in background so opening this task later is instant.
+       * Errors are swallowed: on failure the task is simply loaded as usual.
+       */
+      prefetchTask(taskID) {
+        if (!isDefined(taskID) || getRoot(self).SDK?.mode === "labelstream") return;
+
+        const params = self.getTaskParams(taskID);
+        const root = self.root;
+
+        prefetchTaskData(taskID, () => root.apiCall("task", params, undefined, { errorHandler: () => true }));
+      },
+
+      loadTask: flow(function* (taskID, { select = true } = {}) {
+        if (!isDefined(taskID)) {
+          console.warn("Task ID must be provided");
+          return;
+        }
+
+        self.setLoading(taskID);
+
+        const isLabelStream = getRoot(self).SDK?.mode === "labelstream";
+
+        // Use data prefetched while the previous task was open (quick view only)
+        const prefetched = isLabelStream ? null : takePrefetchedTaskData(taskID);
+        let taskData = prefetched ? yield prefetched : null;
+
+        if (!taskData) {
+          taskData = yield self.root.apiCall("task", self.getTaskParams(taskID));
+        }
 
         const taskStatusCode =
           taskData?.status ??
@@ -200,9 +225,12 @@ export const create = (columns) => {
       }),
 
       loadNextTask: flow(function* ({ select = true } = {}) {
-        const taskData = yield self.root.invokeAction("next_task", {
-          reload: false,
-        });
+        // upcoming tasks hint (for image prefetch) is kept aside, not stored in the task
+        const taskData = takeLabelStreamHint(
+          yield self.root.invokeAction("next_task", {
+            reload: false,
+          }),
+        );
 
         if (taskData?.$meta?.status === 404) {
           getRoot(self).SDK.invoke("labelStreamFinished");

@@ -11,6 +11,7 @@ import { TabStore } from "./Tabs";
 import { CustomJSON } from "./types";
 import { User } from "./Users";
 import { ActivityObserver } from "../utils/ActivityObserver";
+import { isInstantSwitchEnabled, isTaskDataReady, trackApiCall } from "../sdk/task-prefetch";
 
 /**
  * @type {ActivityObserver | null}
@@ -210,10 +211,15 @@ export const AppStore = types
 
       if (!isDefined(taskID)) return;
 
-      self.setLoadingData(true);
+      // Task data is already prefetched: switch without the loading overlay and paint pauses
+      const instantSwitch = self.mode !== "labelstream" && isInstantSwitchEnabled() && isTaskDataReady(taskID);
 
-      // Yield to browser so loading indicator paints before heavy store operations
-      yield new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (!instantSwitch) {
+        self.setLoadingData(true);
+
+        // Yield to browser so loading indicator paints before heavy store operations
+        yield new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
 
       if (self.mode === "labelstream") {
         yield self.taskStore.loadNextTask({
@@ -637,6 +643,9 @@ export const AppStore = types
      * @param {{ errorHandler?: fn, headers?: object, allowToCancel?: boolean }} [options] additional options like errorHandler
      */
     apiCall: flow(function* (methodName, params, body, options) {
+      // A write may make prefetched data of neighbouring tasks stale
+      const writeFinished = trackApiCall(methodName, params, [self.taskStore?.selected?.id, self.LSF?.task?.id]);
+
       const isAllowCancel = options?.allowToCancel;
       const controller = new AbortController();
       const signal = controller.signal;
@@ -655,11 +664,16 @@ export const AppStore = types
         }
         self.requestsInFlight.set(requestKey, controller);
       }
-      const result = yield self.API[methodName](requestParams, {
-        headers: requestHeaders,
-        body: requestBody.body ?? requestBody,
-        options,
-      });
+      let result;
+      try {
+        result = yield self.API[methodName](requestParams, {
+          headers: requestHeaders,
+          body: requestBody.body ?? requestBody,
+          options,
+        });
+      } finally {
+        writeFinished();
+      }
 
       if (isAllowCancel) {
         result.isCanceled = signal.aborted;

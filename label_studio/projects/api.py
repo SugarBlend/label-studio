@@ -27,7 +27,7 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from label_studio_sdk.label_interface.interface import LabelInterface
 from ml.serializers import MLBackendSerializer
-from projects.functions.next_task import get_next_task
+from projects.functions.next_task import get_next_task, get_upcoming_tasks_hint
 from projects.functions.stream_history import get_label_stream_history
 from projects.functions.utils import recalculate_created_annotations_and_labels_from_scratch
 from projects.models import Project, ProjectImport, ProjectManager, ProjectReimport, ProjectSummary
@@ -462,6 +462,7 @@ class ProjectNextTaskAPI(generics.RetrieveAPIView):
         response = serializer.data
 
         response['queue'] = queue_info
+        response['prefetch_hint'] = get_upcoming_tasks_hint(request.user, prepared_tasks, project, dm_queue, next_task)
         return Response(response)
 
 

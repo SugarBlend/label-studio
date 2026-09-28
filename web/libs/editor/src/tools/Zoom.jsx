@@ -109,7 +109,8 @@ const _Tool = types
       const posx = item.zoomingPositionX + ev.movementX;
       const posy = item.zoomingPositionY + ev.movementY;
 
-      item.setZoomPosition(posx, posy);
+      if (item.userSetZoomPosition) item.userSetZoomPosition(posx, posy);
+      else item.setZoomPosition(posx, posy);
     },
 
     mousemoveEv(ev) {

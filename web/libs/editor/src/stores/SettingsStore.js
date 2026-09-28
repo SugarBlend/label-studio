@@ -73,6 +73,8 @@ const SettingsModel = types
     videoDrawOutside: types.optional(types.boolean, false),
 
     invertedZoom: types.optional(types.boolean, false),
+
+    preserveZoom: types.optional(types.boolean, true),
   })
   .views((self) => ({
     get annotation() {
@@ -236,6 +238,10 @@ const SettingsModel = types
 
     setInvertedZoom(value) {
       self.invertedZoom = value;
+    },
+
+    togglePreserveZoom() {
+      self.preserveZoom = !self.preserveZoom;
     },
 
     setVideoHopSize(value) {
