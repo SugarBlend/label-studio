@@ -222,6 +222,12 @@
         "decorators": ""
     },
     {
+        "url": "/api/projects/<int:pk>/access/",
+        "module": "projects.api.ProjectAccessAPI",
+        "name": "projects:api:project-access",
+        "decorators": ""
+    },
+    {
         "url": "/api/templates/",
         "module": "projects.api.TemplateListAPI",
         "name": "projects:api-templates:template-list",

@@ -103,12 +103,28 @@ class BaseUserSerializerUpdate(BaseUserSerializer):
 
 class BaseWhoAmIUserSerializer(BaseUserSerializer):
     permissions = serializers.SerializerMethodField()
+    is_org_admin = serializers.SerializerMethodField(
+        help_text='Admin of the active organization: sees all projects, creates projects, manages project access'
+    )
+    project_access_control = serializers.SerializerMethodField(
+        help_text='Whether project access control is enabled on this server'
+    )
 
     class Meta(BaseUserSerializer.Meta):
-        fields = BaseUserSerializer.Meta.fields + ('permissions',)
+        fields = BaseUserSerializer.Meta.fields + ('permissions', 'is_org_admin', 'project_access_control')
 
     def get_permissions(self, user) -> list[str]:
         return [perm for _, perm in all_permissions]
+
+    def get_is_org_admin(self, user) -> bool:
+        from projects.access import is_access_control_enabled, is_org_admin
+
+        return not is_access_control_enabled() or is_org_admin(user)
+
+    def get_project_access_control(self, user) -> bool:
+        from projects.access import is_access_control_enabled
+
+        return is_access_control_enabled()
 
 
 class UserSimpleSerializer(BaseUserSerializer):

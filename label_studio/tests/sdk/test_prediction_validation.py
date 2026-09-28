@@ -1,10 +1,8 @@
 import pytest
 from django.contrib.auth import get_user_model
 from label_studio_sdk import LabelStudio
-from organizations.tests.factories import OrganizationFactory
 from projects.tests.factories import ProjectFactory
 from tasks.tests.factories import TaskFactory
-from users.tests.factories import UserFactory
 
 User = get_user_model()
 
@@ -13,13 +11,13 @@ class TestSDKPredictionValidation:
     """Comprehensive tests for prediction validation using Label Studio SDK"""
 
     @pytest.fixture(autouse=True)
-    def setup(self, django_db_setup, django_db_blocker):
+    def setup(self, django_db_setup, django_db_blocker, business_client):
         """Set up test environment with user, organization, project, and task using factories"""
         with django_db_blocker.unblock():
-            self.user = UserFactory()
-            self.organization = OrganizationFactory(created_by=self.user)
-            self.user.active_organization = self.organization
-            self.user.save()
+            # the project must belong to the organization of the user calling the API (business_client):
+            # predictions can only be created in projects the user has access to
+            self.user = business_client.user
+            self.organization = business_client.organization
 
             # Create a project with a comprehensive label configuration
             self.project = ProjectFactory(

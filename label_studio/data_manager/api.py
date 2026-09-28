@@ -25,6 +25,7 @@ from django.utils.decorators import method_decorator
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
+from projects.access import accessible_projects_q, ensure_project_access
 from projects.models import Project
 from projects.serializers import ProjectSerializer
 from rest_framework import generics, viewsets
@@ -160,6 +161,7 @@ class ViewAPI(viewsets.ModelViewSet):
     )
 
     def perform_create(self, serializer):
+        ensure_project_access(self.request.user, serializer.validated_data.get('project'))
         serializer.save(user=self.request.user)
 
     @extend_schema(
@@ -234,7 +236,11 @@ class ViewAPI(viewsets.ModelViewSet):
         return Response(status=200)
 
     def get_queryset(self):
-        return View.objects.filter(project__organization=self.request.user.active_organization).order_by('order', 'id')
+        return (
+            View.objects.filter(project__organization=self.request.user.active_organization)
+            .filter(accessible_projects_q(self.request.user, 'project_id'))
+            .order_by('order', 'id')
+        )
 
 
 class TaskPagination(PageNumberPagination):

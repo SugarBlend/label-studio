@@ -47,6 +47,8 @@ _api_urlpatterns = [
     path('<int:pk>/model-versions/', api.ProjectModelVersions.as_view(), name='project-model-versions'),
     # List all annotators for project
     path('<int:pk>/annotators/', api.ProjectAnnotatorsAPI.as_view(), name='project-annotators'),
+    # project access control: who (besides org admins) can open this project
+    path('<int:pk>/access/', api.ProjectAccessAPI.as_view(), name='project-access'),
 ]
 
 _api_urlpatterns_templates = [

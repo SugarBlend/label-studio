@@ -20,6 +20,8 @@ export const PeoplePage = () => {
   const toast = useToast();
   const [selectedUser, setSelectedUser] = useState(null);
   const [invitationOpen, setInvitationOpen] = useState(false);
+  // bumped when a member changes (e.g. admin role), so the list reloads
+  const [membersVersion, setMembersVersion] = useState(0);
 
   useUpdatePageTitle("People");
 
@@ -84,10 +86,18 @@ export const PeoplePage = () => {
           selectedUser={selectedUser}
           defaultSelected={defaultSelected}
           onSelect={(user) => selectUser(user)}
+          version={membersVersion}
         />
 
         {selectedUser ? (
-          <SelectedUser user={selectedUser} onClose={() => selectUser(null)} />
+          <SelectedUser
+            user={selectedUser}
+            onClose={() => selectUser(null)}
+            onChange={(user) => {
+              setSelectedUser(user);
+              setMembersVersion((v) => v + 1);
+            }}
+          />
         ) : (
           isFF(FF_LSDV_E_297) && <HeidiTips collection="organizationPage" />
         )}

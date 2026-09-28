@@ -2,6 +2,7 @@
 test_name: crud for webhooks
 marks:
   - usefixtures:
+      - project_access_control_disabled
       - django_live_url
       - configured_project
 stages:

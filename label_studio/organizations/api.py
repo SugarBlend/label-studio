@@ -20,9 +20,10 @@ from organizations.serializers import (
     OrganizationMemberSerializer,
     OrganizationSerializer,
 )
+from projects.access import accessible_projects_q, ensure_org_admin
 from projects.models import Project
 from rest_framework import generics, status
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.generics import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -142,6 +143,7 @@ class OrganizationMemberListAPI(generics.ListAPIView):
         user_ids = [member.user_id for member in members]
         projects = (
             Project.objects.filter(created_by_id__in=user_ids, organization=self.request.user.active_organization)
+            .filter(accessible_projects_q(self.request.user))
             .values('created_by_id', 'id', 'title')
             .distinct()
         )
@@ -158,8 +160,10 @@ class OrganizationMemberListAPI(generics.ListAPIView):
     def _get_contributed_to_projects_map(self):
         members = self.paginated_members
         user_ids = [member.user_id for member in members]
-        org_project_ids = Project.objects.filter(organization=self.request.user.active_organization).values_list(
-            'id', flat=True
+        org_project_ids = (
+            Project.objects.filter(organization=self.request.user.active_organization)
+            .filter(accessible_projects_q(self.request.user))
+            .values_list('id', flat=True)
         )
         annotations = (
             Annotation.objects.filter(completed_by__in=list(user_ids), project__in=list(org_project_ids))
@@ -272,16 +276,17 @@ class OrganizationMemberListAPI(generics.ListAPIView):
 class OrganizationMemberDetailAPI(GetParentObjectMixin, generics.RetrieveDestroyAPIView):
     permission_required = ViewClassPermission(
         GET=all_permissions.organizations_view,
+        PATCH=all_permissions.organizations_change,
         DELETE=all_permissions.organizations_change,
     )
     parent_queryset = Organization.objects.all()
     parser_classes = (JSONParser, FormParser, MultiPartParser)
     serializer_class = OrganizationMemberSerializer
-    http_method_names = ['delete', 'get']
+    http_method_names = ['delete', 'get', 'patch']
 
     @property
     def permission_classes(self):
-        if self.request.method == 'DELETE':
+        if self.request.method in ('DELETE', 'PATCH'):
             return [IsAuthenticated, HasObjectPermission]
         return api_settings.DEFAULT_PERMISSION_CLASSES
 
@@ -315,8 +320,44 @@ class OrganizationMemberDetailAPI(GetParentObjectMixin, generics.RetrieveDestroy
         if member.user_id == request.user.id:
             return Response({'detail': 'User cannot soft delete self'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
+        # project access control: only admins remove members, and the owner can't be removed
+        ensure_org_admin(request.user, org, 'Only organization admins can remove members')
+        if member.is_owner:
+            raise PermissionDenied('The organization owner cannot be removed')
+
         member.soft_delete()
         return Response(status=204)  # 204 No Content is a common HTTP status for successful delete requests
+
+    @extend_schema(
+        tags=['Organizations'],
+        summary='Update organization membership',
+        description='Make a member an organization admin or revoke admin rights. Only admins can do this; '
+        'the organization owner is always an admin.',
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {'is_admin': {'type': 'boolean'}},
+                'required': ['is_admin'],
+            }
+        },
+    )
+    def patch(self, request, pk=None, user_pk=None):
+        org = self.parent_object
+        if org != request.user.active_organization:
+            raise PermissionDenied('You can change members only for your current active organization')
+        ensure_org_admin(request.user, org, 'Only organization admins can change member roles')
+
+        member = get_object_or_404(OrganizationMember, user_id=user_pk, organization=org, deleted_at__isnull=True)
+
+        if 'is_admin' not in request.data:
+            raise ValidationError({'is_admin': 'This field is required.'})
+        is_admin = bool_from_request(request.data, 'is_admin', False)
+        if member.is_owner and not is_admin:
+            raise PermissionDenied('The organization owner is always an admin')
+
+        member.is_admin = is_admin
+        member.save(update_fields=['is_admin', 'updated_at'])
+        return Response(self.get_serializer(member).data)
 
 
 @method_decorator(

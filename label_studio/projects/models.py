@@ -111,7 +111,9 @@ class ProjectManager(models.Manager):
         return ProjectQuerySetWithFSM(self.model, using=self._db)
 
     def for_user(self, user):
-        return self.get_queryset().filter(organization=user.active_organization)
+        from projects.access import accessible_projects_q
+
+        return self.get_queryset().filter(organization=user.active_organization).filter(accessible_projects_q(user))
 
     def with_state(self):
         """

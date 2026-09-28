@@ -861,3 +861,13 @@ def pytest_collection_modifyitems(config, items):
             other_tests.append(item)
 
     items[:] = other_tests + mock_tests
+
+
+@pytest.fixture
+def project_access_control_disabled(settings):
+    """Every organization member can open every project (stock Label Studio behaviour).
+
+    For tests where several users of one organization work in the same project and access
+    control is not what is being tested (see tests/test_project_access.py for that).
+    """
+    settings.PROJECT_ACCESS_CONTROL_ENABLED = False

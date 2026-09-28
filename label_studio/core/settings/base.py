@@ -554,6 +554,8 @@ LABEL_STREAM_HISTORY_LIMIT = int(get_env('LABEL_STREAM_HISTORY_LIMIT', default=1
 RANDOM_NEXT_TASK_SAMPLE_SIZE = int(get_env('RANDOM_NEXT_TASK_SAMPLE_SIZE', 50))
 # How many upcoming tasks the next-task API suggests for image prefetch in the label stream (0 disables)
 NEXT_TASK_PREFETCH_HINT = int(get_env('NEXT_TASK_PREFETCH_HINT', 3))
+# Project access control: only org admins and users granted access can open a project (see projects/access.py)
+PROJECT_ACCESS_CONTROL_ENABLED = get_bool_env('PROJECT_ACCESS_CONTROL_ENABLED', True)
 
 TASK_API_PAGE_SIZE_MAX = int(get_env('TASK_API_PAGE_SIZE_MAX', 0)) or None
 

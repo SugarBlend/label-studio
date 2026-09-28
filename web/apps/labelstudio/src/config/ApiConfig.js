@@ -13,6 +13,7 @@ export const API_CONFIG = {
     // Organization
     memberships: "/organizations/:pk/memberships",
     userMemberships: "/organizations/:pk/memberships/:userPk",
+    updateMembership: "PATCH:/organizations/:pk/memberships/:userPk/",
     inviteLink: "/invite",
     resetInviteLink: "POST:/invite/reset-token",
 
@@ -20,6 +21,8 @@ export const API_CONFIG = {
     projects: "/projects",
     project: "/projects/:pk",
     updateProject: "PATCH:/projects/:pk",
+    projectAccess: "/projects/:pk/access/",
+    updateProjectAccess: "POST:/projects/:pk/access/",
     createProject: "POST:/projects",
     deleteProject: "DELETE:/projects/:pk",
     projectResetCache: "POST:/projects/:pk/summary/reset",

@@ -426,6 +426,10 @@ def invite_client_to_project(client, project):
     if apps.is_installed('annotators'):
         return client.get(f'/annotator/invites/{project.token}/')
     else:
+        # project access control: the invited user gets access to the project (as an admin would grant it)
+        user = getattr(client, 'annotator', None) or getattr(client, 'user', None)
+        if user is not None:
+            project.add_collaborator(user)
         return SimpleNamespace(status_code=200)
 
 

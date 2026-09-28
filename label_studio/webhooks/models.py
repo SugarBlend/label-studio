@@ -93,6 +93,12 @@ class Webhook(models.Model):
         # In LSE, LseProjectMixin.has_permission checks that Managers are project members.
         if self.project is not None and not self.project.has_permission(user):
             return False
+        # organization-level webhooks: admins only (project access control)
+        if self.project is None:
+            from projects.access import is_access_control_enabled, is_org_admin
+
+            if is_access_control_enabled() and not is_org_admin(user, self.organization_id):
+                return False
         return True
 
     class Meta:

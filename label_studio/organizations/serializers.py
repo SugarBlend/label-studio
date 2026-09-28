@@ -12,6 +12,15 @@ from tasks.models import Annotation
 from users.serializers import UserSerializer
 
 
+def _accessible_projects_q(context, project_field):
+    """Only list projects the requesting user may open (project access control)"""
+    from django.db.models import Q
+    from projects.access import accessible_projects_q
+
+    request = context.get('request')
+    return accessible_projects_q(request.user, project_field) if request is not None else Q()
+
+
 class OrganizationIdSerializer(DynamicFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = Organization
@@ -72,10 +81,19 @@ class OrganizationMemberListSerializer(DynamicFieldsMixin, serializers.ModelSeri
     user = UserOrganizationMemberListSerializer()
     created_projects = serializers.SerializerMethodField(read_only=True)
     contributed_to_projects = serializers.SerializerMethodField(read_only=True)
+    is_admin = serializers.SerializerMethodField(read_only=True)
+    is_owner = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = OrganizationMember
-        fields = ['id', 'organization', 'user', 'created_projects', 'contributed_to_projects']
+        fields = ['id', 'organization', 'user', 'created_projects', 'contributed_to_projects', 'is_admin', 'is_owner']
+
+    def get_is_owner(self, member) -> bool:
+        return member.is_owner
+
+    def get_is_admin(self, member) -> bool:
+        # the owner is always an admin
+        return bool(member.is_admin or member.is_owner)
 
     def get_created_projects(self, member) -> list[ProjectInfo] | None:
         if not self.context.get('contributed_to_projects', False):
@@ -108,7 +126,11 @@ class OrganizationMemberSerializer(DynamicFieldsMixin, serializers.ModelSerializ
         if not self.context.get('contributed_to_projects', False):
             return None
         organization = self.context.get('organization')
-        projects = Project.objects.filter(created_by=member.user, organization=organization).values('id', 'title')
+        projects = (
+            Project.objects.filter(created_by=member.user, organization=organization)
+            .filter(_accessible_projects_q(self.context, 'id'))
+            .values('id', 'title')
+        )
         projects = projects[:100]   # Limit to 100 projects
         return [
             {
@@ -124,6 +146,7 @@ class OrganizationMemberSerializer(DynamicFieldsMixin, serializers.ModelSerializ
         organization = self.context.get('organization')
         annotations = (
             Annotation.objects.filter(completed_by=member.user, project__organization=organization)
+            .filter(_accessible_projects_q(self.context, 'project_id'))
             .values('project__id', 'project__title')
             .distinct()
         )
@@ -136,6 +159,16 @@ class OrganizationMemberSerializer(DynamicFieldsMixin, serializers.ModelSerializ
             for annotation in annotations
         ]
 
+    is_admin = serializers.SerializerMethodField(read_only=True)
+    is_owner = serializers.SerializerMethodField(read_only=True)
+
+    def get_is_owner(self, member) -> bool:
+        return member.is_owner
+
+    def get_is_admin(self, member) -> bool:
+        # the owner is always an admin
+        return bool(member.is_admin or member.is_owner)
+
     class Meta:
         model = OrganizationMember
         fields = [
@@ -146,6 +179,8 @@ class OrganizationMemberSerializer(DynamicFieldsMixin, serializers.ModelSerializ
             'created_at',
             'created_projects',
             'contributed_to_projects',
+            'is_admin',
+            'is_owner',
         ]
 
 

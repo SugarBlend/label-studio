@@ -595,7 +595,13 @@ class AnnotationManager(models.Manager):
         return AnnotationQuerySetWithFSM(self.model, using=self._db)
 
     def for_user(self, user):
-        return self.get_queryset().filter(project__organization=user.active_organization)
+        from projects.access import accessible_projects_q
+
+        return (
+            self.get_queryset()
+            .filter(project__organization=user.active_organization)
+            .filter(accessible_projects_q(user, 'project_id'))
+        )
 
     def with_state(self):
         """Return queryset with FSM state annotated."""

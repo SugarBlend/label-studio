@@ -38,6 +38,13 @@ class OrganizationMember(OrganizationMemberMixin, models.Model):
         'If NULL, the member is not considered deleted.',
     )
 
+    is_admin = models.BooleanField(
+        _('is admin'),
+        default=False,
+        help_text='Organization admin: has access to all projects, creates projects and manages project access. '
+        'The organization owner is always an admin.',
+    )
+
     # objects = OrganizationMemberQuerySet.as_manager()
 
     @classmethod

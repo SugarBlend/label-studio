@@ -35,7 +35,7 @@ export const ProjectsList = ({ projects, currentPage, totalItems, loadNextPage, 
   );
 };
 
-export const EmptyProjectsList = ({ openModal }) => {
+export const EmptyProjectsList = ({ openModal, canCreate = true }) => {
   return (
     <div className={cn("empty-projects-page").toClassName()}>
       <img
@@ -44,10 +44,16 @@ export const EmptyProjectsList = ({ openModal }) => {
         src={absoluteURL("/static/images/opossum_looking.png")}
       />
       <h1 className={cn("empty-projects-page").elem("header").toClassName()}>Heidi doesn't see any projects here!</h1>
-      <p>Create one and start labeling your data.</p>
-      <Button onClick={openModal} className="my-8" aria-label="Create new project">
-        Create Project
-      </Button>
+      {canCreate ? (
+        <>
+          <p>Create one and start labeling your data.</p>
+          <Button onClick={openModal} className="my-8" aria-label="Create new project">
+            Create Project
+          </Button>
+        </>
+      ) : (
+        <p>No projects have been shared with you yet. Ask an organization admin to give you access.</p>
+      )}
     </div>
   );
 };

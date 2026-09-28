@@ -8,6 +8,7 @@ import { ApiContext } from "../../providers/ApiProvider";
 import { useContextProps } from "../../providers/RoutesProvider";
 import { cn } from "../../utils/bem";
 import { CreateProject } from "../CreateProject/CreateProject";
+import { useIsOrgAdmin } from "../../hooks/useIsOrgAdmin";
 import { DataManagerPage } from "../DataManager/DataManager";
 import { SettingsPage } from "../Settings";
 import { EmptyProjectsList, ProjectsList } from "./ProjectsList";
@@ -21,6 +22,7 @@ const getCurrentPage = () => {
 };
 
 export const ProjectsPage = () => {
+  const { isOrgAdmin } = useIsOrgAdmin();
   const api = React.useContext(ApiContext);
   const abortController = useAbortController();
   const [projectsList, setProjectsList] = React.useState([]);
@@ -113,8 +115,9 @@ export const ProjectsPage = () => {
   React.useEffect(() => {
     // there is a nice page with Create button when list is empty
     // so don't show the context button in that case
-    setContextProps({ openModal, showButton: projectsList.length > 0 });
-  }, [projectsList.length]);
+    // project access control: only organization admins create projects
+    setContextProps({ openModal, showButton: projectsList.length > 0 && isOrgAdmin });
+  }, [projectsList.length, isOrgAdmin]);
 
   return (
     <div className={cn("projects-page").toClassName()}>
@@ -132,7 +135,7 @@ export const ProjectsPage = () => {
               pageSize={defaultPageSize}
             />
           ) : (
-            <EmptyProjectsList openModal={openModal} />
+            <EmptyProjectsList openModal={openModal} canCreate={isOrgAdmin} />
           )}
           {modal && <CreateProject onClose={closeModal} />}
         </div>

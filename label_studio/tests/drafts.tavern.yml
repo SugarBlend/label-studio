@@ -423,6 +423,7 @@ test_name: remove_other_users_draft_on_annotation_create
 strict: false
 marks:
 - usefixtures:
+  - project_access_control_disabled
   - django_live_url
 stages:
 - id: signup

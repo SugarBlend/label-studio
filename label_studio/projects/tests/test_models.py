@@ -1,5 +1,5 @@
 """Tests for projects.models (Project model and related logic)."""
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from projects.models import Project
 from projects.tests.factories import ProjectFactory
 from tasks.models import Task
@@ -105,9 +105,55 @@ class TestRearrangeOverlapCohort(TestCase):
 
 
 class TestProjectHasPermission(TestCase):
-    """LSO has one organization, so has_permission only has to reject revoked membership."""
+    """Project access control: admins see every project, other members only projects shared with them."""
 
-    def test_member_is_allowed(self):
+    def test_member_without_access_is_rejected(self):
+        project = ProjectFactory()
+        user = UserFactory(active_organization=project.organization)
+
+        assert project.has_permission(user) is False
+
+    def test_member_with_granted_access_is_allowed(self):
+        project = ProjectFactory()
+        user = UserFactory(active_organization=project.organization)
+        project.add_collaborator(user)
+
+        assert project.has_permission(user) is True
+
+    def test_disabled_project_membership_is_rejected(self):
+        project = ProjectFactory()
+        user = UserFactory(active_organization=project.organization)
+        project.add_collaborator(user)
+        project.members.filter(user=user).update(enabled=False)
+
+        assert project.has_permission(user) is False
+
+    def test_organization_owner_is_allowed(self):
+        project = ProjectFactory()
+
+        assert project.has_permission(project.organization.created_by) is True
+
+    def test_organization_admin_is_allowed(self):
+        project = ProjectFactory()
+        user = UserFactory(active_organization=project.organization)
+        user.om_through.filter(organization=project.organization).update(is_admin=True)
+
+        assert project.has_permission(user) is True
+
+    def test_superuser_is_allowed(self):
+        project = ProjectFactory()
+        user = UserFactory(active_organization=project.organization, is_superuser=True)
+
+        assert project.has_permission(user) is True
+
+    def test_admin_of_another_organization_is_rejected(self):
+        project = ProjectFactory()
+        other_project = ProjectFactory()
+
+        assert project.has_permission(other_project.organization.created_by) is False
+
+    @override_settings(PROJECT_ACCESS_CONTROL_ENABLED=False)
+    def test_member_is_allowed_when_access_control_disabled(self):
         project = ProjectFactory()
         user = UserFactory(active_organization=project.organization)
 

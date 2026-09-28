@@ -8,6 +8,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { HeidiTips } from "../../components/HeidiTips/HeidiTips";
 import { useAPI } from "../../providers/ApiProvider";
 import { CreateProject } from "../CreateProject/CreateProject";
+import { useIsOrgAdmin } from "../../hooks/useIsOrgAdmin";
 import { InviteLink } from "../Organization/PeoplePage/InviteLink";
 import type { Page } from "../types/Page";
 import {
@@ -60,6 +61,9 @@ type Action = (typeof actions)[number]["type"];
 
 export const HomePage: Page = () => {
   const api = useAPI();
+  // project access control: only organization admins create projects
+  const { isOrgAdmin } = useIsOrgAdmin();
+  const visibleActions = actions.filter((action) => isOrgAdmin || action.type !== "createProject");
   const location = useLocation();
   const [modalIsOpen, setModalIsOpen] = useAtom(creationDialogOpen);
   const [invitationIsOpen, setInvitationIsOpen] = useAtom(invitationOpen);
@@ -143,7 +147,7 @@ export const HomePage: Page = () => {
             </Typography>
           </div>
           <div className="flex justify-start gap-4">
-            {actions.map((action) => {
+            {visibleActions.map((action) => {
               return (
                 <Button
                   key={action.title}
@@ -186,15 +190,28 @@ export const HomePage: Page = () => {
                 >
                   <IconFolderOpen />
                 </div>
-                <Typography variant="headline" size="small">
-                  Create your first project
-                </Typography>
-                <Typography size="small" className="text-neutral-content-subtler">
-                  Import your data and set up the labeling interface to start annotating
-                </Typography>
-                <Button className="mt-4" onClick={() => setModalIsOpen(true)} aria-label="Create new project">
-                  Create Project
-                </Button>
+                {isOrgAdmin ? (
+                  <>
+                    <Typography variant="headline" size="small">
+                      Create your first project
+                    </Typography>
+                    <Typography size="small" className="text-neutral-content-subtler">
+                      Import your data and set up the labeling interface to start annotating
+                    </Typography>
+                    <Button className="mt-4" onClick={() => setModalIsOpen(true)} aria-label="Create new project">
+                      Create Project
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Typography variant="headline" size="small">
+                      No projects yet
+                    </Typography>
+                    <Typography size="small" className="text-neutral-content-subtler">
+                      No projects have been shared with you yet. Ask an organization admin to give you access.
+                    </Typography>
+                  </>
+                )}
               </div>
             ) : isSuccess && data && sortedProjects.length > 0 ? (
               <div className="flex flex-col gap-1">

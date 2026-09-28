@@ -1,7 +1,11 @@
 import { format } from "date-fns";
 import { NavLink } from "react-router-dom";
 import { IconCross } from "@humansignal/icons";
-import { Userpic, Button } from "@humansignal/ui";
+import { useState } from "react";
+import { Userpic, Button, Toggle, useToast } from "@humansignal/ui";
+import { useAuth } from "@humansignal/core/providers/AuthProvider";
+import { useIsOrgAdmin } from "../../../hooks/useIsOrgAdmin";
+import { useAPI } from "../../../providers/ApiProvider";
 import { cn } from "../../../utils/bem";
 import "./SelectedUser.scss";
 
@@ -22,7 +26,53 @@ const UserProjectsLinks = ({ projects }) => {
   );
 };
 
-export const SelectedUser = ({ user, onClose }) => {
+/**
+ * Project access control: organization admins see all projects, create projects and manage project access.
+ * Admins can make other members admins; the owner is always an admin.
+ */
+const AdminRole = ({ user, onChange }) => {
+  const api = useAPI();
+  const toast = useToast();
+  const { user: currentUser } = useAuth();
+  const { isOrgAdmin, accessControl } = useIsOrgAdmin();
+  const [saving, setSaving] = useState(false);
+
+  if (!accessControl) return null;
+
+  const toggle = async (e) => {
+    const isAdmin = e.target.checked;
+    setSaving(true);
+    const result = await api.callApi("updateMembership", {
+      params: { pk: currentUser.active_organization, userPk: user.id },
+      body: { is_admin: isAdmin },
+    });
+    setSaving(false);
+
+    if (result && !result.error) {
+      toast.show({ message: isAdmin ? "Member is now an organization admin" : "Admin rights revoked" });
+      onChange?.({ ...user, is_admin: isAdmin });
+    }
+  };
+
+  return (
+    <div className={cn("user-info").elem("section").toClassName()}>
+      <div className={cn("user-info").elem("section-title").toClassName()}>Role</div>
+      <Toggle
+        checked={!!user.is_admin}
+        disabled={!isOrgAdmin || user.is_owner || saving}
+        onChange={toggle}
+        label="Organization admin"
+        description={
+          user.is_owner
+            ? "The organization owner is always an admin"
+            : "Sees all projects, creates projects and manages who can open them"
+        }
+      />
+    </div>
+  );
+};
+
+export const SelectedUser = ({ user, onClose, onChange }) => {
   const fullName = [user.first_name, user.last_name]
     .filter((n) => !!n)
     .join(" ")
@@ -46,6 +96,8 @@ export const SelectedUser = ({ user, onClose }) => {
           <p className={cn("user-info").elem("email").toClassName()}>{user.email}</p>
         </div>
       </div>
+
+      <AdminRole user={user} onChange={onChange} />
 
       {user.phone && (
         <div className={cn("user-info").elem("section").toClassName()}>

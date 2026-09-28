@@ -18,6 +18,7 @@ from django.utils.decorators import method_decorator
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
+from projects.access import accessible_projects_q, ensure_project_access
 from projects.functions.stream_history import fill_history_annotation
 from projects.models import Project
 from rest_framework import generics, viewsets
@@ -186,7 +187,9 @@ class TaskListAPI(DMTaskListAPI):
 
     def filter_queryset(self, queryset):
         queryset = super().filter_queryset(queryset)
-        return queryset.filter(project__organization=self.request.user.active_organization)
+        return queryset.filter(project__organization=self.request.user.active_organization).filter(
+            accessible_projects_q(self.request.user, 'project_id')
+        )
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -198,6 +201,7 @@ class TaskListAPI(DMTaskListAPI):
     def perform_create(self, serializer):
         project_id = self.request.data.get('project')
         project = generics.get_object_or_404(Project, pk=project_id)
+        ensure_project_access(self.request.user, project)
         instance = serializer.save(project=project)
         emit_webhooks_for_instance(
             self.request.user.active_organization, project, WebhookAction.TASKS_CREATED, [instance]
@@ -865,11 +869,17 @@ class AnnotationDraftListAPI(generics.ListCreateAPIView):
     )
     queryset = AnnotationDraft.objects.all()
 
+    def _check_task_access(self):
+        task = generics.get_object_or_404(Task.objects.select_related('project'), pk=self.kwargs['pk'])
+        ensure_project_access(self.request.user, task.project)
+
     def filter_queryset(self, queryset):
+        self._check_task_access()
         task_id = self.kwargs['pk']
         return queryset.filter(task_id=task_id)
 
     def perform_create(self, serializer):
+        self._check_task_access()
         task_id = self.kwargs['pk']
         annotation_id = self.kwargs.get('annotation_id')
         user = self.request.user
@@ -1056,7 +1066,15 @@ class PredictionAPI(viewsets.ModelViewSet):
     filterset_fields = ['task', 'task__project', 'project']
 
     def get_queryset(self):
-        return Prediction.objects.filter(project__organization=self.request.user.active_organization)
+        return Prediction.objects.filter(project__organization=self.request.user.active_organization).filter(
+            accessible_projects_q(self.request.user, 'project_id')
+        )
+
+    def perform_create(self, serializer):
+        task = serializer.validated_data.get('task')
+        project = task.project if task is not None else serializer.validated_data.get('project')
+        ensure_project_access(self.request.user, project)
+        super().perform_create(serializer)
 
 
 @method_decorator(name='get', decorator=extend_schema(exclude=True))

@@ -11,9 +11,12 @@ import { Spinner } from "../../components/Spinner/Spinner";
 import { useAPI } from "../../providers/ApiProvider";
 import { useProject } from "../../providers/ProjectProvider";
 import { cn } from "../../utils/bem";
+import { useIsOrgAdmin } from "../../hooks/useIsOrgAdmin";
 
 export const DangerZone = () => {
   const { project } = useProject();
+  // project access control: only organization admins delete projects
+  const { isOrgAdmin } = useIsOrgAdmin();
   const api = useAPI();
   const history = useHistory();
   const toast = useToast();
@@ -187,13 +190,13 @@ export const DangerZone = () => {
         help: "If the Data Manager is not loading, dropping all Data Manager tabs can help.",
         label: "Drop All Tabs",
       },
-      {
+      isOrgAdmin && {
         type: "project",
         help: "Deleting a project removes all tasks, annotations, and project data from the database.",
         label: "Delete Project",
       },
     ],
-    [project],
+    [project, isOrgAdmin],
   );
 
   return (
@@ -208,7 +211,7 @@ export const DangerZone = () => {
 
       {project.id ? (
         <div style={{ marginTop: 16 }}>
-          {buttons.map((btn) => {
+          {buttons.filter(Boolean).map((btn) => {
             const waiting = processing === btn.type;
             const disabled = btn.disabled || (processing && !waiting);
 

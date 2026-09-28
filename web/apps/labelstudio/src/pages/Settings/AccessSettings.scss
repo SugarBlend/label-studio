@@ -1,0 +1,73 @@
+.project-access {
+  max-width: 720px;
+
+  &__description {
+    margin: 8px 0 24px;
+    color: var(--color-neutral-content-subtle);
+  }
+
+  &__loading {
+    display: flex;
+    justify-content: center;
+    margin-top: 32px;
+  }
+
+  &__toolbar {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  &__search {
+    flex: 1;
+    max-width: 320px;
+  }
+
+  &__counter {
+    color: var(--color-neutral-content-subtler);
+  }
+
+  &__list {
+    border: 1px solid var(--color-neutral-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  &__row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 16px;
+
+    & + & {
+      border-top: 1px solid var(--color-neutral-border);
+    }
+  }
+
+  &__user {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__name {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-weight: 500;
+    color: var(--color-neutral-content);
+  }
+
+  &__email {
+    font-size: 12px;
+    color: var(--color-neutral-content-subtler);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__empty {
+    padding: 16px;
+    color: var(--color-neutral-content-subtler);
+  }
+}

@@ -17,7 +17,7 @@ from core.utils.io import find_dir, find_file, read_yaml
 from core.utils.serializer_to_openapi_params import serializer_to_openapi_params
 from data_manager.functions import filters_ordering_selected_items_exist, get_prepared_queryset
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import F
 from django.http import Http404
 from django.utils.decorators import method_decorator
@@ -27,10 +27,19 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from label_studio_sdk.label_interface.interface import LabelInterface
 from ml.serializers import MLBackendSerializer
+from organizations.models import OrganizationMember
+from projects.access import accessible_projects_q, ensure_org_admin
 from projects.functions.next_task import get_next_task, get_upcoming_tasks_hint
 from projects.functions.stream_history import get_label_stream_history
 from projects.functions.utils import recalculate_created_annotations_and_labels_from_scratch
-from projects.models import Project, ProjectImport, ProjectManager, ProjectReimport, ProjectSummary
+from projects.models import (
+    Project,
+    ProjectImport,
+    ProjectManager,
+    ProjectMember,
+    ProjectReimport,
+    ProjectSummary,
+)
 from projects.serializers import (
     GetFieldsSerializer,
     ProjectCountsSerializer,
@@ -42,7 +51,7 @@ from projects.serializers import (
     ProjectSerializer,
     ProjectSummarySerializer,
 )
-from rest_framework import filters, generics, status
+from rest_framework import filters, generics, serializers, status
 from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import ValidationError as RestValidationError
 from rest_framework.pagination import PageNumberPagination
@@ -50,7 +59,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
-from rest_framework.views import exception_handler
+from rest_framework.views import APIView, exception_handler
 from tasks.models import Annotation, Task
 from tasks.serializers import (
     NextTaskSerializer,
@@ -180,8 +189,10 @@ class ProjectListAPI(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         fields = serializer.validated_data.get('include')
         filter = serializer.validated_data.get('filter')
-        projects = Project.objects.filter(organization=self.request.user.active_organization).order_by(
-            F('pinned_at').desc(nulls_last=True), '-created_at'
+        projects = (
+            Project.objects.filter(organization=self.request.user.active_organization)
+            .filter(accessible_projects_q(self.request.user))
+            .order_by(F('pinned_at').desc(nulls_last=True), '-created_at')
         )
         if filter in ['pinned_only', 'exclude_pinned']:
             projects = projects.filter(pinned_at__isnull=filter == 'exclude_pinned')
@@ -201,6 +212,8 @@ class ProjectListAPI(generics.ListCreateAPIView):
         return context
 
     def perform_create(self, ser):
+        # project access control: only organization admins create projects
+        ensure_org_admin(self.request.user, message='Only organization admins can create projects')
         try:
             ser.save(organization=self.request.user.active_organization)
         except IntegrityError as e:
@@ -247,8 +260,10 @@ class ProjectCountsListAPI(generics.ListAPIView):
         serializer = GetFieldsSerializer(data=self.request.query_params)
         serializer.is_valid(raise_exception=True)
         fields = serializer.validated_data.get('include')
-        projects = Project.objects.with_counts(fields=fields).filter(
-            organization=self.request.user.active_organization
+        projects = (
+            Project.objects.with_counts(fields=fields)
+            .filter(organization=self.request.user.active_organization)
+            .filter(accessible_projects_q(self.request.user))
         )
 
         # Only annotate FSM state for UI/API consumption when both feature flags are enabled
@@ -381,8 +396,10 @@ class ProjectAPI(generics.RetrieveUpdateDestroyAPIView):
         serializer = GetFieldsSerializer(data=self.request.query_params)
         serializer.is_valid(raise_exception=True)
         fields = serializer.validated_data.get('include')
-        projects = Project.objects.with_counts(fields=fields).filter(
-            organization=self.request.user.active_organization
+        projects = (
+            Project.objects.with_counts(fields=fields)
+            .filter(organization=self.request.user.active_organization)
+            .filter(accessible_projects_q(self.request.user))
         )
 
         # Only annotate FSM state for UI/API consumption when both feature flags are enabled
@@ -415,6 +432,8 @@ class ProjectAPI(generics.RetrieveUpdateDestroyAPIView):
         return super(ProjectAPI, self).patch(request, *args, **kwargs)
 
     def perform_destroy(self, instance):
+        # project access control: like creation, deleting a whole project is for organization admins only
+        ensure_org_admin(self.request.user, instance.organization, 'Only organization admins can delete projects')
         # we don't need to relaculate counters if we delete whole project
         with temporary_disconnect_all_signals():
             instance.delete()
@@ -863,7 +882,9 @@ class ProjectModelVersions(generics.RetrieveAPIView):
     permission_required = all_permissions.projects_view
 
     def get_queryset(self):
-        return Project.objects.filter(organization=self.request.user.active_organization)
+        return Project.objects.filter(organization=self.request.user.active_organization).filter(
+            accessible_projects_q(self.request.user)
+        )
 
     def get(self, request, *args, **kwargs):
         project = self.get_object()
@@ -931,3 +952,89 @@ class ProjectAnnotatorsAPI(generics.RetrieveAPIView):
         users = User.objects.filter(id__in=annotator_ids).prefetch_related('om_through').order_by('id')
         data = UserSimpleSerializer(users, many=True, context={'request': request}).data
         return Response(data)
+
+
+class ProjectAccessUpdateSerializer(serializers.Serializer):
+    user_ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+    has_access = serializers.BooleanField()
+
+
+@method_decorator(
+    name='get',
+    decorator=extend_schema(
+        tags=['Projects'],
+        summary='List project access',
+        description='Organization members with a flag whether they can open this project. '
+        'Admins always have access. Only organization admins can use this endpoint.',
+    ),
+)
+@method_decorator(
+    name='post',
+    decorator=extend_schema(
+        tags=['Projects'],
+        summary='Grant or revoke project access',
+        description='Grant (`has_access: true`) or revoke (`has_access: false`) access to the project for the given '
+        'organization members. Admins always have access and are not affected. Only organization admins can use '
+        'this endpoint.',
+        request=ProjectAccessUpdateSerializer,
+    ),
+)
+class ProjectAccessAPI(APIView):
+    parser_classes = (JSONParser,)
+    permission_required = ViewClassPermission(
+        GET=all_permissions.projects_view,
+        POST=all_permissions.projects_change,
+    )
+
+    def _get_project(self, request, pk):
+        project = generics.get_object_or_404(
+            Project.objects.filter(organization=request.user.active_organization), pk=pk
+        )
+        ensure_org_admin(request.user, project.organization, 'Only organization admins can manage project access')
+        return project
+
+    def _members(self, project):
+        return (
+            OrganizationMember.objects.filter(organization=project.organization, deleted_at__isnull=True)
+            .select_related('user')
+            .order_by('user__email')
+        )
+
+    def _response(self, project):
+        granted = set(ProjectMember.objects.filter(project=project, enabled=True).values_list('user_id', flat=True))
+        owner_id = project.organization.created_by_id
+        users = []
+        for member in self._members(project):
+            user = member.user
+            is_admin = bool(member.is_admin or user.id == owner_id or user.is_superuser)
+            users.append(
+                {
+                    **UserSimpleSerializer(user).data,
+                    'is_admin': is_admin,
+                    'has_access': is_admin or user.id in granted,
+                }
+            )
+        return Response({'users': users})
+
+    def get(self, request, pk):
+        return self._response(self._get_project(request, pk))
+
+    def post(self, request, pk):
+        project = self._get_project(request, pk)
+        serializer = ProjectAccessUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_ids = set(serializer.validated_data['user_ids'])
+        has_access = serializer.validated_data['has_access']
+
+        member_ids = set(self._members(project).filter(user_id__in=user_ids).values_list('user_id', flat=True))
+        unknown = sorted(user_ids - member_ids)
+        if unknown:
+            raise RestValidationError({'user_ids': f'Not members of the organization: {unknown}'})
+
+        with transaction.atomic():
+            for user_id in member_ids:
+                ProjectMember.objects.update_or_create(
+                    project=project, user_id=user_id, defaults={'enabled': has_access}
+                )
+
+        return self._response(project)

@@ -186,7 +186,7 @@ class ModelRun(models.Model):
     completed_at = models.DateTimeField(_('completed at'), null=True, default=None)
 
     def has_permission(self, user):
-        return user.active_organization == self.organization
+        return user.active_organization == self.organization and self.project.has_permission(user)
 
     def delete_predictions(self):
         """

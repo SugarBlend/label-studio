@@ -5,6 +5,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from projects import models as project_models
+from projects.access import accessible_projects_q
 from rest_framework import generics
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -67,7 +68,10 @@ class WebhookListAPI(generics.ListCreateAPIView):
     )
 
     def get_queryset(self):
-        return Webhook.objects.filter(organization=self.request.user.active_organization)
+        # org-level webhooks (no project) are visible to admins only; project webhooks to users with project access
+        return Webhook.objects.filter(organization=self.request.user.active_organization).filter(
+            accessible_projects_q(self.request.user, 'project_id')
+        )
 
     def perform_create(self, serializer):
         from rest_framework.exceptions import PermissionDenied
@@ -145,7 +149,10 @@ class WebhookAPI(generics.RetrieveUpdateDestroyAPIView):
         return super().get_serializer_class()
 
     def get_queryset(self):
-        return Webhook.objects.filter(organization=self.request.user.active_organization)
+        # org-level webhooks (no project) are visible to admins only; project webhooks to users with project access
+        return Webhook.objects.filter(organization=self.request.user.active_organization).filter(
+            accessible_projects_q(self.request.user, 'project_id')
+        )
 
 
 @method_decorator(

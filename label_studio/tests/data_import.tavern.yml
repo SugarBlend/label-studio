@@ -370,6 +370,7 @@ test_name: import_previous_export
 strict: false
 marks:
 - usefixtures:
+  - project_access_control_disabled
   - django_live_url
 stages:
 - id: signup
