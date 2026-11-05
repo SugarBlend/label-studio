@@ -1,73 +1,65 @@
 .project-access {
-  max-width: 720px;
+  max-width: 1120px;
+  width: 100%;
+  padding: 30px 34px 56px;
+  box-sizing: border-box;
+  color: var(--color-neutral-content);
+  *, *::before, *::after { box-sizing: border-box; }
+  h1, h2, p { margin: 0; }
+  &__header { margin-bottom: 23px; }
+  &__eyebrow { color: var(--color-neutral-content-subtler); font-size: 11px; letter-spacing: 1px; font-weight: 700; margin-bottom: 9px; }
+  h1 { font-size: 29px; letter-spacing: -.6px; line-height: 1.25; font-weight: 700; }
+  &__description { font-size: 14px; line-height: 1.6; max-width: 740px; margin-top: 10px !important; color: var(--color-neutral-content-subtler); }
 
-  &__description {
-    margin: 8px 0 24px;
-    color: var(--color-neutral-content-subtle);
+  &__summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-bottom: 22px; }
+  &__stat { display: flex; flex-direction: column; gap: 5px; padding: 20px; background: var(--color-neutral-surface); border: 1px solid var(--color-neutral-border); border-radius: 11px; color: var(--color-neutral-content-subtler); font-size: 12px; }
+  &__stat-number { font-size: 27px; font-weight: 700; color: var(--color-neutral-content); line-height: 1.2; font-variant-numeric: tabular-nums; }
+
+  &__panel { background: var(--color-neutral-surface); border: 1px solid var(--color-neutral-border); border-radius: 11px; overflow: hidden; }
+  &__toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 17px 18px; border-bottom: 1px solid var(--color-neutral-border); }
+  &__search-label { flex: 1 1 240px; max-width: 360px; }
+  &__search-label input { display: block; width: 100%; min-height: 40px; color: var(--color-neutral-content); background: var(--color-neutral-surface); font: inherit; font-size: 13px; border: 1px solid var(--color-neutral-border); padding: 9px 12px; border-radius: 7px; outline: none; }
+  &__search-label input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px #3b82f622; }
+  &__filters { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  &__filter, &__filter-active { border: 1px solid transparent; border-radius: 7px; padding: 8px 11px; font: inherit; font-weight: 600; font-size: 12px; cursor: pointer; background: transparent; color: var(--color-neutral-content-subtler); white-space: nowrap; }
+  &__filter:hover { background: var(--color-neutral-background); }
+  &__filter-active { color: #1d4ed8; background: #eff6ff; border-color: #dbeafe; }
+  &__filter:focus-visible, &__filter-active:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+
+  &__group + &__group { border-top: 1px solid var(--color-neutral-border); }
+  &__group-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 15px 19px 12px; background: var(--color-neutral-background); border-bottom: 1px solid var(--color-neutral-border); }
+  &__group-heading h2 { font-weight: 650; font-size: 13px; }
+  &__group-heading span { font-size: 11px; color: var(--color-neutral-content-subtler); }
+  &__row { display: flex; align-items: center; min-height: 69px; gap: 13px; padding: 12px 18px; }
+  &__row + &__row { border-top: 1px solid var(--color-neutral-border); }
+  &__identity { min-width: 0; flex: 1 1 auto; }
+  &__name-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+  &__name-line strong { font-weight: 650; }
+  &__email { color: var(--color-neutral-content-subtler); margin-top: 4px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &__badge-owner, &__badge-admin { background: #eff6ff; border: 1px solid #dbeafe; color: #1d4ed8; padding: 3px 7px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+  &__badge-owner { color: #854d0e; background: #fef9c3; border-color: #fde68a; }
+  &__permission { display: flex; gap: 16px; align-items: center; flex-shrink: 0; justify-content: flex-end; }
+  &__state-granted, &__state-denied { font-size: 12px; font-weight: 600; white-space: nowrap; color: #177245; }
+  &__state-denied { color: var(--color-neutral-content-subtler); }
+  &__loading, &__empty { padding: 32px; border: 1px solid var(--color-neutral-border); border-radius: 9px; color: var(--color-neutral-content-subtler); text-align: center; }
+  &__empty { border: 0; }
+  &__note { color: var(--color-neutral-content-subtler); font-size: 12px; line-height: 1.5; margin-top: 15px; }
+  &__error { color: #b42318; background: #fff1f0; border: 1px solid #ffc7c2; padding: 13px 16px; margin-top: 12px; border-radius: 8px; }
+  &__sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+  @media (max-width: 990px) {
+    & { padding: 24px; }
+    &__toolbar { align-items: stretch; flex-direction: column; }
+    &__search-label { max-width: none; flex-basis: auto; }
   }
-
-  &__loading {
-    display: flex;
-    justify-content: center;
-    margin-top: 32px;
-  }
-
-  &__toolbar {
-    display: flex;
-    gap: 16px;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-  }
-
-  &__search {
-    flex: 1;
-    max-width: 320px;
-  }
-
-  &__counter {
-    color: var(--color-neutral-content-subtler);
-  }
-
-  &__list {
-    border: 1px solid var(--color-neutral-border);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  &__row {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    padding: 10px 16px;
-
-    & + & {
-      border-top: 1px solid var(--color-neutral-border);
-    }
-  }
-
-  &__user {
-    flex: 1;
-    min-width: 0;
-  }
-
-  &__name {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-weight: 500;
-    color: var(--color-neutral-content);
-  }
-
-  &__email {
-    font-size: 12px;
-    color: var(--color-neutral-content-subtler);
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  &__empty {
-    padding: 16px;
-    color: var(--color-neutral-content-subtler);
+  @media (max-width: 560px) {
+    & { padding: 16px; }
+    h1 { font-size: 25px; }
+    &__summary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+    &__stat { padding: 12px; font-size: 10px; }
+    &__stat-number { font-size: 22px; }
+    &__row { padding: 12px; gap: 9px; }
+    &__permission { flex-direction: column; align-items: flex-end; gap: 6px; }
+    &__group-heading { padding: 12px; }
   }
 }
