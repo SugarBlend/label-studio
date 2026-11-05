@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { reaction } from "mobx";
 import { adaptSkeleton, createReconstructionRunner, readSkeletonSnapshot } from "./adapter";
 import { requestReconstruction } from "./request";
@@ -28,6 +29,75 @@ export function Skeleton3D({ store, config, docked = false }) {
   const [panel, setPanel] = useState(readPanelState);
   const box = useRef(null);
   const moving = useRef(null);
+  const anchor = useRef(null);
+  const popupWindow = useRef(null);
+  const [popout, setPopout] = useState(null);
+  // Hoist the scene controls so that detaching/reattaching the portal never
+  // resets the orbit, visual layers, or selected joint.
+  const [sceneView, setSceneView] = useState({ yaw: -1.1, pitch: 0.23, zoom: 1, pan: [0, 0] });
+  const [sceneOptions, setSceneOptions] = useState({
+    colour: "body", size: 1, grid: true, labels: true,
+    labelNames: false, cameras: false, rays: false,
+    shadow: true, trail: false, path: false, soles: true,
+  });
+  const [selectedJoint, setSelectedJoint] = useState(null);
+  const openPopout = () => {
+    if (popout) {
+      popout.win.focus();
+      return;
+    }
+    // Must be called synchronously from the button click: browser popup blockers
+    // otherwise reject the secondary monitor window.
+    const win = window.open("", "labelstudio-live-skeleton3d", "popup=yes,width=1100,height=850,resizable=yes,scrollbars=yes");
+    if (!win) {
+      window.alert("The browser blocked the 3D window. Allow popups for this Label Studio origin.");
+      return;
+    }
+    const doc = win.document;
+    doc.title = "Label Studio — live 3D skeleton";
+    doc.body.replaceChildren();
+    doc.body.style.margin = "0";
+    doc.body.style.background = "#f6f8fc";
+    doc.body.style.fontFamily = "system-ui, sans-serif";
+    doc.body.style.color = "#25303f";
+    const style = doc.createElement("style");
+    style.textContent = "*,*::before,*::after{box-sizing:border-box}button,select,input{font:inherit}button{cursor:pointer}#skeleton3d-popout{width:100%;min-height:100vh;display:flex;flex-direction:column}";
+    doc.head.appendChild(style);
+    const root = doc.createElement("div");
+    root.id = "skeleton3d-popout";
+    doc.body.appendChild(root);
+    popupWindow.current = win;
+    setPopout({ win, root });
+    win.focus();
+  };
+  const attachPopout = () => {
+    const win = popupWindow.current;
+    popupWindow.current = null;
+    setPopout(null);
+    if (win && !win.closed) win.close();
+  };
+  useEffect(() => {
+    const mainView = anchor.current?.closest(".main-view--skeleton3d");
+    if (popout) mainView?.classList.add("main-view--skeleton3d-detached");
+    else mainView?.classList.remove("main-view--skeleton3d-detached");
+    return () => mainView?.classList.remove("main-view--skeleton3d-detached");
+  }, [popout]);
+  useEffect(() => {
+    if (!popout) return undefined;
+    const handleClosed = () => {
+      if (popupWindow.current === popout.win) {
+        popupWindow.current = null;
+        setPopout(null);
+      }
+    };
+    popout.win.addEventListener("beforeunload", handleClosed);
+    return () => popout.win.removeEventListener("beforeunload", handleClosed);
+  }, [popout]);
+  useEffect(() => () => {
+    const win = popupWindow.current;
+    if (win && !win.closed) win.close();
+    popupWindow.current = null;
+  }, []);
   // Snapshot the full calibration: changing it invalidates an in-flight response.
   const configKey = JSON.stringify(config);
   useEffect(() => {
@@ -56,6 +126,7 @@ export function Skeleton3D({ store, config, docked = false }) {
         if (current.task !== currentTask) {
           currentTask = current.task;
           history.current = [];
+          setSelectedJoint(null);
         }
         runner.update({ ...adaptSkeleton(current, settings), config: settings });
       },
@@ -107,11 +178,11 @@ export function Skeleton3D({ store, config, docked = false }) {
   ];
   const status = state.status === "pending" ? "reconstructing…" : state.status === "ready" ? "drag to orbit · wheel to zoom" : "";
   const angles = safeData ? `L ${formatAngle(safeData.foot_tilt?.left)} · R ${formatAngle(safeData.foot_tilt?.right)}` : "";
-  return (
+  const scene = (
     <section ref={box} aria-label="Live 3D skeleton"
       style={{
         ...(docked ? {
-          position: "relative", width: "100%", minHeight: "100%", maxHeight: "none", border: "none", borderRadius: 0, boxShadow: "none",
+          position: "relative", width: "100%", minHeight: popout ? "100vh" : "100%", maxHeight: "none", border: "none", borderRadius: 0, boxShadow: "none",
         } : {
           position: "fixed", zIndex: 1200, width: "min(440px, 92vw)", maxHeight: "80vh",
           border: "1px solid #cbd5e1", borderRadius: 8, boxShadow: "0 10px 28px rgba(15, 23, 42, 0.18)",
@@ -148,6 +219,11 @@ export function Skeleton3D({ store, config, docked = false }) {
         </span>
         {warnings.length > 0 && <span title="Warnings" style={{ fontSize: 11, color: "#b45309" }}>⚠{warnings.length}</span>}
         <span style={{ flex: 1 }} />
+        <button type="button" title={popout ? "Return 3D to the Label Studio editor" : "Open 3D in a separate window"}
+          onClick={popout ? attachPopout : openPopout}
+          style={{ border: "1px solid #cbd5e1", borderRadius: 4, padding: "4px 9px", background: "#f8fafc", fontSize: 12 }}>
+          {popout ? "Return to editor" : "Open in window ↗"}
+        </button>
         {!docked && <button type="button" aria-expanded={!panel.collapsed} title={panel.collapsed ? "Expand" : "Collapse"}
           onClick={() => setPanel((current) => ({ ...current, collapsed: !current.collapsed }))}
           style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "2px 6px" }}>
@@ -155,7 +231,7 @@ export function Skeleton3D({ store, config, docked = false }) {
         </button>}
       </header>
       {(docked || !panel.collapsed) && (
-        <div style={{ padding: "8px 10px 10px", overflow: "auto" }}>
+        <div style={{ padding: "8px 10px 10px", overflow: "auto", flex: popout ? "1 1 auto" : undefined, minHeight: 0 }}>
           <div role="status" aria-live="polite" style={{ fontSize: 12, color: "#b91c1c" }}>{state.error}</div>
           {rejectedByQuality.length > 0 && (
             <div role="alert" style={{
@@ -173,7 +249,11 @@ export function Skeleton3D({ store, config, docked = false }) {
               Open Warnings and Reconstruction quality below to identify the failing camera slots.
             </div>
           )}
-          {safeData && <SkeletonCanvas3D data={safeData} config={config} docked={docked} history={history.current} />}
+          {safeData && <SkeletonCanvas3D data={safeData} config={config} docked={docked}
+            detached={Boolean(popout)} history={history.current}
+            controlledView={sceneView} onChangeView={setSceneView}
+            controlledOptions={sceneOptions} onChangeOptions={setSceneOptions}
+            controlledSelectedJoint={selectedJoint} onChangeSelectedJoint={setSelectedJoint} />}
           {!data && <p style={{ fontSize: 12, color: "#475569" }}>Waiting for keypoints in at least two camera slots.</p>}
           <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
             Triangulation only, no fitting. Geometric angle, not a clinical assessment; positive means the big toe is higher.
@@ -195,5 +275,11 @@ export function Skeleton3D({ store, config, docked = false }) {
         </div>
       )}
     </section>
+  );
+  return (
+    <>
+      <span ref={anchor} style={{ display: "none" }} aria-hidden="true" />
+      {popout ? createPortal(scene, popout.root) : scene}
+    </>
   );
 }
