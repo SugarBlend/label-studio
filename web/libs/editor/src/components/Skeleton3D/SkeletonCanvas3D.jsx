@@ -30,7 +30,7 @@ function tint(hex, factor) {
   return "#" + rgb.map((value) => Math.min(255, Math.max(0, Math.round(value * factor))).toString(16).padStart(2, "0")).join("");
 }
 
-function draw3D(canvas, data, config, view, options, history) {
+function draw3D(canvas, data, config, view, options, history, selectedJoint) {
   if (!canvas) return;
   const bounds = canvas.getBoundingClientRect();
   const w = Math.max(1, bounds.width);
@@ -112,7 +112,9 @@ function draw3D(canvas, data, config, view, options, history) {
   }
 
   const links = new Map([...standardEdges, ...(data.edges || [])].map((edge) => [[...edge].sort().join(":"), edge]));
-  const edges = [...links.values()].filter(([a, b]) => projected.has(a) && projected.has(b));
+  // Do not reintroduce neck-to-central-hip from manually authored Relations.
+  const edges = [...links.values()].filter(([a, b]) =>
+    projected.has(a) && projected.has(b) && !((a === "neck" && b === "hip") || (a === "hip" && b === "neck")));
 
   // Contact shadows share the same ground plane as the grid.
   if (options.shadow) {
@@ -149,11 +151,12 @@ function draw3D(canvas, data, config, view, options, history) {
       const centre = cameraCentre(camera.calibration);
       if (!centre) continue;
       const projectedCamera = pt(world(centre));
-      if (options.rays) {
-        const observed = joints.filter((joint) => (joint.views || []).includes(camera.slot));
-        // Keep the overlay legible even with full-body annotations.
-        for (const joint of observed.filter((_, i) => i % 3 === 0)) {
-          line(projectedCamera, projected.get(joint.joint), "#a89d6e", 0.9, 0.28);
+      // Rays are only meaningful for a selected reconstructed joint.
+      // Show that joint's camera-centre rays in calibrated world coordinates.
+      if (options.rays && selectedJoint && projected.has(selectedJoint)) {
+        const selected = joints.find((joint) => joint.joint === selectedJoint);
+        if (selected?.views?.includes(camera.slot)) {
+          line(projectedCamera, projected.get(selectedJoint), "#d39b3f", 1.8, 0.85);
         }
       }
       if (options.cameras) {
@@ -169,7 +172,7 @@ function draw3D(canvas, data, config, view, options, history) {
         ctx.fill();
         ctx.stroke();
         ctx.font = "12px system-ui, sans-serif";
-        ctx.fillText("camera_" + camera.slot, p.x + 11, p.y - 5);
+        ctx.fillText(camera.name || "camera_" + camera.slot, p.x + 11, p.y - 5);
       }
     }
   }
@@ -208,6 +211,13 @@ function draw3D(canvas, data, config, view, options, history) {
     ctx.beginPath();ctx.arc(p.x, p.y, radiusPx, 0, 2 * Math.PI);
     ctx.fillStyle = halo;ctx.fill();
     ctx.strokeStyle = "#eaf0f7";ctx.lineWidth = 0.8;ctx.stroke();
+    if (joint.joint === selectedJoint) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radiusPx + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = "#d39b3f";
+      ctx.lineWidth = 2.8;
+      ctx.stroke();
+    }
     if (options.labels && options.labelNames) {
       ctx.font = "11px system-ui, sans-serif";
       ctx.fillStyle = "#1e293b";
@@ -233,6 +243,9 @@ function draw3D(canvas, data, config, view, options, history) {
     }
   }
 
+  // The hit-test uses the same projection as the canvas renderer.
+  const hitTargets = [...projected].map(([joint, p]) => ({ joint, x: p.x, y: p.y }));
+
   // Small world-axis triad in the lower left corner.
   const triadBase = [26, h - 28];
   for (const [vector, colour, name] of [
@@ -246,18 +259,31 @@ function draw3D(canvas, data, config, view, options, history) {
     ctx.fillStyle = colour;ctx.font = "11px sans-serif";
     ctx.fillText(name, triadBase[0] + dx + 2, triadBase[1] + dy - 2);
   }
+  return hitTargets;
 }
 
-export function SkeletonCanvas3D({ data, config, docked = false, history = [] }) {
+export function SkeletonCanvas3D({
+  data, config, docked = false, detached = false, history = [],
+  controlledView, onChangeView, controlledOptions, onChangeOptions,
+  controlledSelectedJoint, onChangeSelectedJoint,
+}) {
   const canvas = useRef(null);
   const drag = useRef(null);
-  const [view, setView] = useState(initialView);
-  const [dimensions, setDimensions] = useState(0);
-  const [options, setOptions] = useState({
+  const hitTargets = useRef([]);
+  const [internalView, setInternalView] = useState(initialView);
+  const [internalOptions, setInternalOptions] = useState({
     colour: "body", size: 1, grid: true, labels: true,
     labelNames: false, cameras: false, rays: false,
     shadow: true, trail: false, path: false, soles: true,
   });
+  const [internalSelectedJoint, setInternalSelectedJoint] = useState(null);
+  const [dimensions, setDimensions] = useState(0);
+  const view = controlledView ?? internalView;
+  const setView = onChangeView ?? setInternalView;
+  const options = controlledOptions ?? internalOptions;
+  const setOptions = onChangeOptions ?? setInternalOptions;
+  const selectedJoint = controlledSelectedJoint === undefined ? internalSelectedJoint : controlledSelectedJoint;
+  const setSelectedJoint = onChangeSelectedJoint ?? setInternalSelectedJoint;
 
   useEffect(() => {
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => setDimensions((v) => v + 1)) : null;
@@ -268,8 +294,8 @@ export function SkeletonCanvas3D({ data, config, docked = false, history = [] })
   }, []);
 
   useEffect(() => {
-    draw3D(canvas.current, data, config, view, options, history);
-  }, [data, config, view, options, history, dimensions]);
+    hitTargets.current = draw3D(canvas.current, data, config, view, options, history, selectedJoint) ?? [];
+  }, [data, config, view, options, history, dimensions, selectedJoint]);
 
   useEffect(() => {
     const element = canvas.current;
@@ -288,7 +314,7 @@ export function SkeletonCanvas3D({ data, config, docked = false, history = [] })
   const toggles = [["labels", "Labels"], ["cameras", "Cameras"], ["rays", "Rays"],
     ["shadow", "Shadow"], ["trail", "Trail"], ["path", "Path"], ["soles", "Soles"]];
   return (
-    <section style={{ display: "flex", flexDirection: "column", width: "100%", minWidth: 0 }}>
+    <section style={{ display: "flex", flexDirection: "column", width: "100%", minWidth: 0, flex: detached ? "1 1 auto" : undefined, minHeight: 0 }}>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 7, padding: "7px 4px", fontSize: 12, background: "#fff" }}>
         <label>Colour{" "}
           <select value={options.colour} onChange={(e) => setOptions((old) => ({ ...old, colour: e.target.value }))}>
@@ -309,13 +335,21 @@ export function SkeletonCanvas3D({ data, config, docked = false, history = [] })
         ))}
         <button type="button" title="Show joint names" onClick={() => toggle("labelNames")}>Joint names</button>
         <button type="button" title="Reset 3D orbit" onClick={() => setView(initialView())}>Reset view</button>
+        {options.rays && (
+          <span style={{ color: "#875600", fontSize: 12 }}>
+            {selectedJoint ? `Rays: ${selectedJoint}` : "Rays: select a joint in 3D"}
+          </span>
+        )}
       </div>
       <canvas
         ref={canvas} tabIndex={0}
         aria-label="3D skeleton scene: drag to rotate; Shift-drag or right-drag to pan; wheel to zoom; double click to reset"
         onDoubleClick={() => setView(initialView())}
         onPointerDown={(event) => {
-          drag.current = { x: event.clientX, y: event.clientY, pan: event.shiftKey || event.button === 2 };
+          drag.current = {
+            x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY,
+            pan: event.shiftKey || event.button === 2, button: event.button,
+          };
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerMove={(event) => {
@@ -327,19 +361,32 @@ export function SkeletonCanvas3D({ data, config, docked = false, history = [] })
           drag.current.x = event.clientX;drag.current.y = event.clientY;
         }}
         onPointerCancel={() => { drag.current = null; }}
-        onPointerUp={() => { drag.current = null; }}
+        onPointerUp={(event) => {
+          const pointer = drag.current;
+          drag.current = null;
+          if (!pointer || pointer.pan || pointer.button !== 0 ||
+              Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY) > 5) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          const x = event.clientX - rect.left, y = event.clientY - rect.top;
+          const nearest = hitTargets.current.reduce((best, target) => {
+            const distance = Math.hypot(target.x - x, target.y - y);
+            return distance < best.distance ? { distance, joint: target.joint } : best;
+          }, { distance: Infinity, joint: null });
+          setSelectedJoint(nearest.distance <= 16 * options.size ? nearest.joint : null);
+        }}
         onKeyDown={(event) => {
           if (event.key.toLowerCase() === "r") setView(initialView());
           if (event.key === "+") setView((old) => ({ ...old, zoom: Math.min(6, old.zoom * 1.2) }));
           if (event.key === "-") setView((old) => ({ ...old, zoom: Math.max(0.3, old.zoom / 1.2) }));
         }}
         style={{
-          width: "100%", height: docked ? "min(66vh, 740px)" : 400,
-          minHeight: docked ? 430 : 260, display: "block", touchAction: "none", cursor: "grab",
+          width: "100%", height: detached ? "calc(100vh - 140px)" : docked ? "min(66vh, 740px)" : 400,
+          minHeight: detached ? 260 : docked ? 430 : 260,
+          display: "block", touchAction: "none", cursor: "grab",
         }}
       />
       <div style={{ padding: "4px 9px", color: "#64748b", fontSize: 11 }}>
-        Left drag: orbit · Shift/right drag: pan · Wheel: zoom · Double click or R: reset
+        Click joint: select for Rays · Left drag: orbit · Shift/right drag: pan · Wheel: zoom · Double click or R: reset
       </div>
     </section>
   );
