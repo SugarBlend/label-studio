@@ -22,6 +22,9 @@ const readPanelState = () => {
 /** Floating read-only window: the 3D view stays visible next to the mosaic while labelling. */
 export function Skeleton3D({ store, config, docked = false }) {
   const [state, setState] = useState({ status: "pending", data: null });
+  // Temporary in-memory reconstruction history for the Trail / Path toggles.
+  // No points or trajectories are saved into the Label Studio annotations.
+  const history = useRef([]);
   const [panel, setPanel] = useState(readPanelState);
   const box = useRef(null);
   const moving = useRef(null);
@@ -29,10 +32,28 @@ export function Skeleton3D({ store, config, docked = false }) {
   const configKey = JSON.stringify(config);
   useEffect(() => {
     const settings = JSON.parse(configKey);
-    const runner = createReconstructionRunner({ request: requestReconstruction, onState: setState });
+    const runner = createReconstructionRunner({
+      request: requestReconstruction,
+      onState: (next) => {
+        if (next.status === "ready" && Array.isArray(next.data?.joints)) {
+          const frame = Object.fromEntries(next.data.joints.map((joint) => [joint.joint, joint.position]));
+          const last = history.current[history.current.length - 1];
+          if (JSON.stringify(frame) !== JSON.stringify(last)) history.current = [...history.current, frame].slice(-90);
+        }
+        setState(next);
+      },
+    });
+    let currentTask = null;
     const dispose = reaction(
       () => JSON.stringify(readSkeletonSnapshot(store)),
-      (snapshot) => runner.update({ ...adaptSkeleton(JSON.parse(snapshot), settings), config: settings }),
+      (snapshot) => {
+        const current = JSON.parse(snapshot);
+        if (current.task !== currentTask) {
+          currentTask = current.task;
+          history.current = [];
+        }
+        runner.update({ ...adaptSkeleton(current, settings), config: settings });
+      },
       { fireImmediately: true },
     );
     return () => { dispose(); runner.dispose(); };
@@ -115,7 +136,7 @@ export function Skeleton3D({ store, config, docked = false }) {
       {(docked || !panel.collapsed) && (
         <div style={{ padding: "8px 10px 10px", overflow: "auto" }}>
           <div role="status" aria-live="polite" style={{ fontSize: 12, color: "#b91c1c" }}>{state.error}</div>
-          {data && <SkeletonCanvas3D data={data} config={config} docked={docked} />}
+          {data && <SkeletonCanvas3D data={data} config={config} docked={docked} history={history.current} />}
           {!data && <p style={{ fontSize: 12, color: "#475569" }}>Waiting for keypoints in at least two camera slots.</p>}
           <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
             Triangulation only, no fitting. Geometric angle, not a clinical assessment; positive means the big toe is higher.
