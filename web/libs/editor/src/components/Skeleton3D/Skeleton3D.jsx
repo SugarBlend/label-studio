@@ -36,9 +36,14 @@ export function Skeleton3D({ store, config, docked = false }) {
       request: requestReconstruction,
       onState: (next) => {
         if (next.status === "ready" && Array.isArray(next.data?.joints)) {
-          const frame = Object.fromEntries(next.data.joints.map((joint) => [joint.joint, joint.position]));
-          const last = history.current[history.current.length - 1];
-          if (JSON.stringify(frame) !== JSON.stringify(last)) history.current = [...history.current, frame].slice(-90);
+          const accepted = next.data.joints.filter((j) =>
+            Number.isFinite(j.rms_reprojection_error_px) && j.rms_reprojection_error_px <= 10);
+          // Do not record trails from globally inconsistent reconstructions.
+          if (accepted.length > next.data.joints.length / 2) {
+            const frame = Object.fromEntries(accepted.map((joint) => [joint.joint, joint.position]));
+            const last = history.current[history.current.length - 1];
+            if (JSON.stringify(frame) !== JSON.stringify(last)) history.current = [...history.current, frame].slice(-90);
+          }
         }
         setState(next);
       },
@@ -79,13 +84,29 @@ export function Skeleton3D({ store, config, docked = false }) {
   }, []);
 
   const data = state.data;
+  const rejectedByQuality = (data?.joints ?? []).filter((joint) =>
+    Number.isFinite(joint.rms_reprojection_error_px) && joint.rms_reprojection_error_px > 10);
+  const goodJoints = (data?.joints ?? []).filter((joint) =>
+    Number.isFinite(joint.rms_reprojection_error_px) && joint.rms_reprojection_error_px <= 10);
+  // Suppress a globally wrong pose rather than presenting impossible bone lengths.
+  const unreliable = !!data?.joints?.length && rejectedByQuality.length >= Math.ceil(data.joints.length / 2);
+  const names = new Set(goodJoints.map((joint) => joint.joint));
+  const validFoot = (side) => ["heel", "big_toe", "small_toe"].every((part) => names.has(`${side}_${part}`));
+  const safeData = data && !unreliable ? {
+    ...data,
+    joints: goodJoints,
+    foot_tilt: {
+      left: validFoot("l") ? data.foot_tilt?.left : null,
+      right: validFoot("r") ? data.foot_tilt?.right : null,
+    },
+  } : null;
   const warnings = [
     ...(state.notes ?? []),
     ...(data?.warnings ?? []).map((w) => (typeof w === "string" ? w : JSON.stringify(w))),
     ...(data?.rejected ?? []).map((r) => `${r.joint}: ${r.reason}`),
   ];
   const status = state.status === "pending" ? "reconstructing…" : state.status === "ready" ? "drag to orbit · wheel to zoom" : "";
-  const angles = data ? `L ${formatAngle(data.foot_tilt?.left)} · R ${formatAngle(data.foot_tilt?.right)}` : "";
+  const angles = safeData ? `L ${formatAngle(safeData.foot_tilt?.left)} · R ${formatAngle(safeData.foot_tilt?.right)}` : "";
   return (
     <section ref={box} aria-label="Live 3D skeleton"
       style={{
@@ -136,7 +157,23 @@ export function Skeleton3D({ store, config, docked = false }) {
       {(docked || !panel.collapsed) && (
         <div style={{ padding: "8px 10px 10px", overflow: "auto" }}>
           <div role="status" aria-live="polite" style={{ fontSize: 12, color: "#b91c1c" }}>{state.error}</div>
-          {data && <SkeletonCanvas3D data={data} config={config} docked={docked} history={history.current} />}
+          {rejectedByQuality.length > 0 && (
+            <div role="alert" style={{
+              padding: "9px 11px", margin: "8px 0", border: "1px solid #f4b38c",
+              background: "#fff7ed", borderRadius: 5, color: "#9a3412", fontSize: 12,
+            }}>
+              <strong>3D reconstruction quality problem:</strong> {rejectedByQuality.length} of {data.joints.length} joints
+              have a reprojection RMS above 10 px.
+              {unreliable
+                ? " The 3D skeleton is hidden because the camera geometry is inconsistent."
+                : " Unreliable joints and their connecting bones are hidden."}
+              {" "}Check Settings → 3D skeleton: enter the camera resolution corresponding to the
+              intrinsics, not an unrelated preview size. For the supplied 3840×2160 Foots mosaic use 1920×1080
+              per camera. Check camera order and raw/undistorted image settings.
+              Open Warnings and Reconstruction quality below to identify the failing camera slots.
+            </div>
+          )}
+          {safeData && <SkeletonCanvas3D data={safeData} config={config} docked={docked} history={history.current} />}
           {!data && <p style={{ fontSize: 12, color: "#475569" }}>Waiting for keypoints in at least two camera slots.</p>}
           <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
             Triangulation only, no fitting. Geometric angle, not a clinical assessment; positive means the big toe is higher.
