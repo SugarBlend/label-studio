@@ -170,6 +170,21 @@ COPY --chown=1001:0 --from=frontend-version-generator $LS_DIR/web/dist/apps/labe
 COPY --chown=1001:0 --from=frontend-version-generator $LS_DIR/web/dist/libs/editor/version.json         $LS_DIR/web/dist/libs/editor/version.json
 COPY --chown=1001:0 --from=frontend-version-generator $LS_DIR/web/dist/libs/datamanager/version.json    $LS_DIR/web/dist/libs/datamanager/version.json
 
+# Git stores the docker-entrypoint.d helpers as symlinks. A checkout created on a
+# filesystem without symlink support (e.g. Windows without Developer Mode) contains
+# them as small text files holding the link target, which makes the entrypoint fail
+# with "No such file or directory". Replace such stubs with a copy of the target;
+# on a normal checkout this loop changes nothing.
+RUN set -eu; \
+    cd $LS_DIR/deploy/docker-entrypoint.d; \
+    for f in app/*.sh app-init/*.sh app-docker/*.sh nginx/*.sh; do \
+        [ -f "$f" ] || continue; \
+        target="$(cat "$f" 2>/dev/null || true)"; \
+        case "$target" in \
+            ../common/*) cp "common/$(basename "$target")" "$f"; echo "restored $f from $target";; \
+        esac; \
+    done
+
 USER 1001
 
 EXPOSE 8080

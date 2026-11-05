@@ -54,7 +54,8 @@ def test_scoped_reconstruction_and_sequence(setup, client):
 
 def test_other_organization_is_hidden_even_with_project_membership(setup):
     admin, member, project, task = setup
-    other_org = Organization.objects.create(title='Other organization', created_by=admin.user)
+    # A user owns at most one organization, so the second one belongs to the other caller.
+    other_org = Organization.objects.create(title='Other organization', created_by=member.user)
     other = Project.objects.create(title='Other', organization=other_org, created_by=admin.user,
                                    skeleton_3d_config=config())
     ProjectMember.objects.create(project=other, user=member.user, enabled=True)
