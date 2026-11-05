@@ -31,7 +31,7 @@ export function readSkeletonSnapshot(store) {
 }
 
 export function adaptSkeleton(snapshot, config) {
-  const fail = (error) => ({ observations: [], edges: [], error });
+  const fail = (error) => ({ observations: [], edges: [], notes: [], error });
   const cameras = config?.cameras;
   if (!Array.isArray(cameras) || cameras.length !== 4 || new Set(cameras.map((c) => c.slot)).size !== 4 ||
       cameras.some((c) => ![0, 1, 2, 3].includes(c.slot) || !Number.isFinite(c.image_width) ||
@@ -43,7 +43,7 @@ export function adaptSkeleton(snapshot, config) {
     return fail("Use a single 2×2 mosaic image; multiple image sources are ambiguous.");
   }
   const observations = [];
-  const seen = new Set();
+  const candidates = new Map();
   const groups = [new Set(), new Set(), new Set(), new Set()];
   const pointsById = new Map();
   for (const point of snapshot.points) {
@@ -61,18 +61,41 @@ export function adaptSkeleton(snapshot, config) {
     if (Math.abs((point.width / point.height) / (camera.image_width / camera.image_height) - 1) > 0.01) {
       return fail(`Slot ${slot}: mosaic quadrant and calibration aspect ratios differ.`);
     }
-    const key = `${slot}:${joint}`;
-    if (seen.has(key)) return fail(`Multiple skeletons or duplicate joint ${joint} in slot ${slot}; select one person per view.`);
-    seen.add(key);
     groups[slot].add(point.group || "ungrouped");
+    const key = `${slot}:${joint}`;
+    if (!candidates.has(key)) candidates.set(key, []);
+    candidates.get(key).push({
+      point,
+      observation: {
+        slot, joint,
+        x: ((point.x / 100 * point.width - column * point.width / 2) / (point.width / 2)) * camera.image_width,
+        y: ((point.y / 100 * point.height - row * point.height / 2) / (point.height / 2)) * camera.image_height,
+      },
+    });
+  }
+  for (let slot = 0; slot < 4; slot++) {
     if (groups[slot].size > 1) return fail(`Ambiguous person groups in slot ${slot}; only one skeleton per view is supported.`);
-    const observation = {
-      slot, joint,
-      x: ((point.x / 100 * point.width - column * point.width / 2) / (point.width / 2)) * camera.image_width,
-      y: ((point.y / 100 * point.height - row * point.height / 2) / (point.height / 2)) * camera.image_height,
-    };
-    observations.push(observation);
-    pointsById.set(point.id, observation);
+  }
+  // Duplicated joints are common after auto-labelling: keep the point closest to the
+  // slot's median position (the body) and report the rest instead of showing nothing.
+  const median = (values) => { const sorted = [...values].sort((a, b) => a - b); return sorted[sorted.length >> 1]; };
+  const reference = [0, 1, 2, 3].map((slot) => {
+    const points = [...candidates.entries()].filter(([key]) => key.startsWith(`${slot}:`)).flatMap(([, list]) => list);
+    return points.length ? [median(points.map((c) => c.observation.x)), median(points.map((c) => c.observation.y))] : null;
+  });
+  const notes = [];
+  for (const [key, list] of candidates) {
+    const slot = Number(key.slice(0, key.indexOf(":")));
+    const joint = key.slice(key.indexOf(":") + 1);
+    let chosen = list[0];
+    if (list.length > 1) {
+      const [x, y] = reference[slot];
+      chosen = list.reduce((best, item) =>
+        Math.hypot(item.observation.x - x, item.observation.y - y) < Math.hypot(best.observation.x - x, best.observation.y - y) ? item : best);
+      notes.push(`Duplicate joint ${joint} in slot ${slot}: kept the point closest to the body, ignored ${list.length - 1}.`);
+    }
+    observations.push(chosen.observation);
+    pointsById.set(chosen.point.id, chosen.observation);
   }
   const edges = [];
   for (const [a, b] of snapshot.edges) {
@@ -80,7 +103,7 @@ export function adaptSkeleton(snapshot, config) {
     const end = pointsById.get(b);
     if (start && end && start.slot === end.slot && start.joint !== end.joint) edges.push([start.joint, end.joint]);
   }
-  return { observations, edges, error: null };
+  return { observations, edges, notes, error: null };
 }
 
 /** Latest-only scheduling: invalidation aborts immediately, before the debounce. */
@@ -93,15 +116,15 @@ export function createReconstructionRunner({ request, onState, delay = 200 }) {
       const current = ++generation;
       clearTimeout(timer);
       controller?.abort();
-      onState({ status: input.error ? "invalid" : "pending", error: input.error, data: null });
+      onState({ status: input.error ? "invalid" : "pending", error: input.error, data: null, notes: input.notes ?? [] });
       if (input.error) return;
       timer = setTimeout(async () => {
         controller = new AbortController();
         try {
           const data = await request(input, current, controller.signal);
-          if (current === generation) onState({ status: "ready", data, error: null });
+          if (current === generation) onState({ status: "ready", data, error: null, notes: input.notes ?? [] });
         } catch (error) {
-          if (current === generation && error.name !== "AbortError") onState({ status: "error", data: null, error: error.message });
+          if (current === generation && error.name !== "AbortError") onState({ status: "error", data: null, error: error.message, notes: [] });
         }
       }, delay);
     },

@@ -14,14 +14,26 @@ test("four independent quadrant groups map percentages to calibration pixels", (
   assert.equal(result.error, null);
   assert.deepEqual(result.observations, [0, 1, 2, 3].map((slot) => ({ slot, joint: "l_big_toe", x: 320, y: 240 })));
 });
-test("rejects mixed people, duplicate joints, multiple images and bad dimensions", () => {
+test("rejects mixed people, multiple images and bad dimensions", () => {
   const a = point("a", 10, 20, "one");
   const b = { ...point("b", 20, 30, "two"), labels: ["l_heel"] };
   assert.match(adaptSkeleton(snapshot([a, b]), config).error, /Ambiguous/);
-  assert.match(adaptSkeleton(snapshot([a, { ...a, id: "b" }]), config).error, /duplicate/);
   assert.match(adaptSkeleton(snapshot([a, { ...b, image: "other" }]), config).error, /multiple image/);
   assert.match(adaptSkeleton(snapshot([{ ...a, width: undefined }]), config).error, /dimensions/);
   assert.match(adaptSkeleton(snapshot([{ ...a, height: 500 }]), config).error, /aspect ratios/);
+});
+test("duplicate joints keep the point nearest the body and are reported", () => {
+  const near = { ...point("n", 32, 32), labels: ["left big toe"] };
+  const stray = { ...point("s", 44, 44), labels: ["left big toe"] };
+  const result = adaptSkeleton(snapshot([
+    { ...point("h", 30, 30), labels: ["l_heel"] },
+    { ...point("k", 30, 46), labels: ["l_knee"] },
+    near, stray,
+  ]), config);
+  assert.equal(result.error, null);
+  const toe = result.observations.find((o) => o.joint === "l_big_toe");
+  assert.ok(Math.abs(toe.x - 409.6) < 1e-6, `kept the nearby toe, got ${toe.x}`);
+  assert.match(result.notes[0], /Duplicate joint l_big_toe in slot 0/);
 });
 test("resizing and display rotation preserve pixel observations; edges stay within views", () => {
   const a = { ...point("a", 0, 0), width: 2560, height: 1920, rotation: 90 };
