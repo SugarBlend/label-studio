@@ -1,10 +1,31 @@
-# Copy alongside YOUR EXISTING Compose file; retain its database, mounts and project name.
-# Build this image first from the patched source checkout with `docker build`.
-# Adapt service names if your Compose uses names other than app/nginx.
+# Необязательный override к действующему docker-compose.yml этого проекта.
+#
+# Топология, под которую он написан: один контейнер на инстанс
+# (`label-studio start --port 8081/8083/8084`), sqlite в ${LS_DATA_PATH},
+# рядом minio, ml-backend и mlflow. Все три инстанса Label Studio используют
+# одну и ту же локально собранную сборку, поэтому образ один.
+#
+# Зачем нужен файл: `pull_policy: never` не даёт Compose пытаться скачать
+# `label-studio:skeleton-lines-1.23.1` из реестра (этого тега там нет) и
+# фиксирует, что образ собирается локально из checkout'а, а не берётся готовым.
+# Ничего другого override не меняет: окружение, тома, БД, порты и имя
+# Compose-проекта остаются вашими.
+#
+# Использование:
+#   docker compose -f docker-compose.yml -f docker-compose.skeleton-3d.yml up -d \
+#     labelstudio labelstudio-reserve labelstudio-outsource
+#
+# Если имена сервисов у вас другие — переименуйте секции, ничего не добавляя.
+
 services:
-  app:
-    image: sugarblend/label-studio:skeleton-3d
+  labelstudio:
+    image: label-studio:skeleton-lines-1.23.1
     pull_policy: never
-  nginx:
-    image: sugarblend/label-studio:skeleton-3d
+
+  labelstudio-reserve:
+    image: label-studio:skeleton-lines-1.23.1
+    pull_policy: never
+
+  labelstudio-outsource:
+    image: label-studio:skeleton-lines-1.23.1
     pull_policy: never
