@@ -1,3 +1,5 @@
+import { Redirect, useParams } from "react-router-dom";
+import { useIsOrgAdmin } from "../../hooks/useIsOrgAdmin";
 import { SidebarMenu } from "../../components/SidebarMenu/SidebarMenu";
 import { WebhookPage } from "../WebhookPage/WebhookPage";
 import { AccessSettings, useAccessSettingsMenuItem } from "./AccessSettings";
@@ -14,6 +16,10 @@ import "./settings.scss";
 export const MenuLayout = ({ children, ...routeProps }) => {
   // project access control: the Access page is shown to organization admins only
   const accessSettings = useAccessSettingsMenuItem();
+  const { canManageProjectSettings, isLoading } = useIsOrgAdmin();
+  const { id } = useParams();
+  if (isLoading) return <div role="status" className="p-6">Checking project settings permissions…</div>;
+  if (!canManageProjectSettings) return <Redirect to={`/projects/${id}/data`} />;
 
   return (
     <SidebarMenu
