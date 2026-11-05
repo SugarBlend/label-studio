@@ -28,7 +28,7 @@ from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiRespo
 from label_studio_sdk.label_interface.interface import LabelInterface
 from ml.serializers import MLBackendSerializer
 from organizations.models import OrganizationMember
-from projects.access import accessible_projects_q, ensure_org_admin
+from projects.access import accessible_projects_q, ensure_org_admin, ensure_project_settings_admin
 from projects.functions.next_task import get_next_task, get_upcoming_tasks_hint
 from projects.functions.stream_history import get_label_stream_history
 from projects.functions.utils import recalculate_created_annotations_and_labels_from_scratch
@@ -451,6 +451,7 @@ class ProjectAPI(generics.RetrieveUpdateDestroyAPIView):
     @api_webhook(WebhookAction.PROJECT_UPDATED)
     def patch(self, request, *args, **kwargs):
         project = self.get_object()
+        ensure_project_settings_admin(request.user, project.organization)
         label_config = self.request.data.get('label_config')
 
         # config changes can break view, so we need to reset them
@@ -464,7 +465,7 @@ class ProjectAPI(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_destroy(self, instance):
         # project access control: like creation, deleting a whole project is for organization admins only
-        ensure_org_admin(self.request.user, instance.organization, 'Only organization admins can delete projects')
+        ensure_project_settings_admin(self.request.user, instance.organization)
         # we don't need to relaculate counters if we delete whole project
         with temporary_disconnect_all_signals():
             instance.delete()
@@ -472,6 +473,7 @@ class ProjectAPI(generics.RetrieveUpdateDestroyAPIView):
     @extend_schema(exclude=True)
     @api_webhook(WebhookAction.PROJECT_UPDATED)
     def put(self, request, *args, **kwargs):
+        ensure_project_settings_admin(request.user, self.get_object().organization)
         return super(ProjectAPI, self).put(request, *args, **kwargs)
 
 
@@ -1021,7 +1023,7 @@ class ProjectAccessAPI(APIView):
         project = generics.get_object_or_404(
             Project.objects.filter(organization=request.user.active_organization), pk=pk
         )
-        ensure_org_admin(request.user, project.organization, 'Only organization admins can manage project access')
+        ensure_project_settings_admin(request.user, project.organization)
         return project
 
     def _members(self, project):
@@ -1042,6 +1044,7 @@ class ProjectAccessAPI(APIView):
                 {
                     **UserSimpleSerializer(user).data,
                     'is_admin': is_admin,
+                    'is_owner': user.id == owner_id,
                     'has_access': is_admin or user.id in granted,
                 }
             )
