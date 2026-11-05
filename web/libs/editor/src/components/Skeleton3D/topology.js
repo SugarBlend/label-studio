@@ -18,7 +18,6 @@ export const standardEdges = [
   ["nose", "r_eye"],
   ["l_eye", "l_ear"],
   ["r_eye", "r_ear"],
-  ["neck", "hip"],
   ["hip", "l_hip"],
   ["hip", "r_hip"],
   ...["l", "r"].flatMap((side) => [
@@ -28,6 +27,8 @@ export const standardEdges = [
     [`${side}_hip`, `${side}_knee`],
     [`${side}_knee`, `${side}_ankle`],
     [`${side}_ankle`, `${side}_heel`],
+    [`${side}_ankle`, `${side}_big_toe`],
+    [`${side}_ankle`, `${side}_small_toe`],
     [`${side}_heel`, `${side}_big_toe`],
     [`${side}_heel`, `${side}_small_toe`],
     [`${side}_big_toe`, `${side}_small_toe`],
