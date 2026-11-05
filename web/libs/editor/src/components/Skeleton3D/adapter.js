@@ -30,6 +30,36 @@ export function readSkeletonSnapshot(store) {
   };
 }
 
+/**
+ * Diagnostic only: a principal point extremely far from the declared image
+ * centre often means camera dimensions were entered incorrectly. We do not
+ * reject off-axis cameras or a deliberately resized mosaic on this heuristic.
+ */
+export function calibrationResolutionWarnings(cameras, mosaicWidth, mosaicHeight) {
+  const notes = [];
+  for (const camera of cameras ?? []) {
+    const calibration = camera?.calibration;
+    const intrinsicCentre = calibration?.intrinsics_w_distortion?.c?.flat?.(Infinity);
+    const K = calibration?.K;
+    const cx = intrinsicCentre?.[0] ?? K?.[0]?.[2];
+    const cy = intrinsicCentre?.[1] ?? K?.[1]?.[2];
+    if (![cx, cy, camera?.image_width, camera?.image_height].every(Number.isFinite)) continue;
+    if (camera.image_width <= 0 || camera.image_height <= 0) continue;
+    const offsetX = Math.abs(cx / camera.image_width - 0.5);
+    const offsetY = Math.abs(cy / camera.image_height - 0.5);
+    if (offsetX <= 0.17 || offsetY <= 0.17) continue;
+    const inferredTile = Number.isFinite(mosaicWidth) && Number.isFinite(mosaicHeight)
+      ? ` This mosaic's tiles are ${Math.round(mosaicWidth / 2)}×${Math.round(mosaicHeight / 2)} px.`
+      : "";
+    notes.push(
+      `Camera slot ${camera.slot} (${camera.name ?? `camera_${camera.slot}`}): possible calibration resolution mismatch. ` +
+      `Configured ${camera.image_width}×${camera.image_height}, principal point ${cx.toFixed(1)},${cy.toFixed(1)} ` +
+      `is unusually far from the image centre.${inferredTile} Verify original calibrated image size and save Settings → 3D skeleton again.`,
+    );
+  }
+  return notes;
+}
+
 export function adaptSkeleton(snapshot, config) {
   const fail = (error) => ({ observations: [], edges: [], notes: [], error });
   const cameras = config?.cameras;
@@ -83,7 +113,7 @@ export function adaptSkeleton(snapshot, config) {
     const points = [...candidates.entries()].filter(([key]) => key.startsWith(`${slot}:`)).flatMap(([, list]) => list);
     return points.length ? [median(points.map((c) => c.observation.x)), median(points.map((c) => c.observation.y))] : null;
   });
-  const notes = [];
+  const notes = calibrationResolutionWarnings(cameras, snapshot.points[0]?.width, snapshot.points[0]?.height);
   for (const [key, list] of candidates) {
     const slot = Number(key.slice(0, key.indexOf(":")));
     const joint = key.slice(key.indexOf(":") + 1);
