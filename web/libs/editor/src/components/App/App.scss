@@ -83,43 +83,6 @@ body {
   }
 }
 
-// Opt-in only: preserve the legacy annotation DOM/layout when disabled.
-.skeleton3d-layout {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  min-width: 0;
-  width: 100%;
-
-  > .main-view__annotation {
-    flex: 1 1 480px;
-    min-width: 0;
-    box-sizing: border-box;
-    // Keep relation/comment overlays anchored to the mosaic, not the preview.
-    position: relative;
-  }
-
-  &__preview {
-    flex: 1 1 320px;
-    min-width: 0;
-    max-width: 400px;
-    box-sizing: border-box;
-    padding: 1em;
-    overflow-wrap: anywhere;
-  }
-
-  @media (max-width: 900px) {
-    flex-direction: column;
-
-    > .main-view__annotation,
-    &__preview {
-      flex: none;
-      width: 100%;
-      max-width: none;
-    }
-  }
-}
-
 .main-content {
   width: 100%;
   height: 100%;
