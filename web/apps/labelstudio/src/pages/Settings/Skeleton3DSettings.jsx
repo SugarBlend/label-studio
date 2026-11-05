@@ -1,19 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAPI } from "../../providers/ApiProvider";
 import { useProject } from "../../providers/ProjectProvider";
+import { cn } from "../../utils/bem";
 import "./Skeleton3DSettings.scss";
 
 const positions = ["Top left", "Top right", "Bottom left", "Bottom right"];
+
+// This project's SCSS loader scopes classes with the "lsf-" prefix.
+// Use the same BEM helper as the other settings pages, instead of literal names.
+const s3d = (element) => cn("skeleton-3d-settings", element ? { elem: element } : {}).toClassName();
 const rowsFromConfig = (config) => positions.map((_, slot) => {
   const camera = config?.cameras?.find((camera) => camera.slot === slot);
   return {
     slot,
-    image_width: camera?.image_width ?? 1280,
-    image_height: camera?.image_height ?? 720,
+    name: camera?.name ?? `camera_${slot}`,
+    image_width: camera?.image_width ?? 1920,
+    image_height: camera?.image_height ?? 1080,
     json: camera?.calibration ? JSON.stringify(camera.calibration, null, 2) : "",
     filename: "",
   };
 });
+
+const cameraStatus = (camera) => {
+  if (!camera.json.trim()) return "missing";
+  try {
+    const data = JSON.parse(camera.json);
+    return data && !Array.isArray(data) && typeof data === "object" ? "ready" : "invalid";
+  } catch {
+    return "invalid";
+  }
+};
 
 export const Skeleton3DSettings = () => {
   const { project, fetchProject } = useProject();
@@ -24,6 +40,7 @@ export const Skeleton3DSettings = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     const config = project?.skeleton_3d_config;
@@ -32,11 +49,22 @@ export const Skeleton3DSettings = () => {
     setFloorUp((config?.floor_up ?? [0, 0, 1]).join(", "));
     setError("");
     setSaved(false);
+    setDirty(false);
   }, [project?.id, project?.skeleton_3d_config]);
+
+  const statuses = useMemo(() => cameras.map(cameraStatus), [cameras]);
+  const readyCount = statuses.filter((status) => status === "ready").length;
+  const invalidCount = statuses.filter((status) => status === "invalid").length;
+
+  const markChanged = () => {
+    setDirty(true);
+    setSaved(false);
+    setError("");
+  };
 
   const changeCamera = (slot, patch) => {
     setCameras((rows) => rows.map((row) => row.slot === slot ? { ...row, ...patch } : row));
-    setSaved(false);
+    markChanged();
   };
 
   const loadFile = async (slot, file) => {
@@ -48,7 +76,11 @@ export const Skeleton3DSettings = () => {
       const data = JSON.parse(text);
       if (!data || Array.isArray(data) || typeof data !== "object") throw new Error("Expected a JSON object.");
       // A filename never determines the mosaic slot: the user assigns it explicitly.
-      changeCamera(slot, { json: JSON.stringify(data, null, 2), filename: file.name });
+      const match = file.name.match(/camera[_-]?(\d+)/i);
+      changeCamera(slot, {
+        json: JSON.stringify(data, null, 2), filename: file.name,
+        ...(match ? { name: `camera_${match[1]}` } : {}),
+      });
     } catch (err) {
       setError(`Camera ${slot}: ${err.message}`);
     }
@@ -71,11 +103,14 @@ export const Skeleton3DSettings = () => {
           throw new Error(`Camera ${row.slot}: enter the calibration image width and height in pixels.`);
         }
         try {
-          return { slot: row.slot, image_width: width, image_height: height, calibration: JSON.parse(row.json) };
+          return { slot: row.slot, name: row.name.trim(), image_width: width, image_height: height, calibration: JSON.parse(row.json) };
         } catch {
           throw new Error(`Camera ${row.slot}: invalid JSON.`);
         }
       });
+      if (configured.some((row) => !row.name || !row.name.trim())) {
+        throw new Error("Every configured camera must have a name.");
+      }
       if ((enabled && configured.length !== 4) || (configured.length !== 0 && configured.length !== 4)) {
         throw new Error("Assign all four camera calibrations before saving, or clear all four and disable 3D.");
       }
@@ -87,6 +122,7 @@ export const Skeleton3DSettings = () => {
         throw new Error(JSON.stringify(result?.validation_errors ?? result?.detail ?? result?.skeleton_3d_config ?? "Unable to save calibration. Check the JSON and your project permissions."));
       }
       await fetchProject(project.id, true);
+      setDirty(false);
       setSaved(true);
     } catch (err) {
       setError(err.message);
@@ -96,51 +132,137 @@ export const Skeleton3DSettings = () => {
   };
 
   return (
-    <div className="skeleton-3d-settings">
-      <h1>3D skeleton / Camera calibration</h1>
-      <p>Live, read-only reconstruction beside a single 2×2 mosaic. Changes apply to every task in this project.</p>
-      <p>Assign files to image positions explicitly. File names and upload order do not determine the camera order.</p>
+    <div className={s3d()}>
+      <header className={s3d("header")}>
+        <div className={s3d("eyebrow")}>Project settings / Multiview</div>
+        <h1>3D skeleton</h1>
+        <p>Configure a single 2×2 camera mosaic for live 3D reconstruction while annotating.</p>
+      </header>
       <form onSubmit={save}>
         <fieldset disabled={busy}>
-          <label className="skeleton-3d-settings__enable">
-            <input type="checkbox" checked={enabled} onChange={(event) => { setEnabled(event.target.checked); setSaved(false); }} />
-            Enable live 3D quality check
-          </label>
-          <div className="skeleton-3d-settings__cameras">
-            {cameras.map((camera) => (
-              <section key={camera.slot} aria-labelledby={`camera-${camera.slot}-title`}>
-                <h2 id={`camera-${camera.slot}-title`}>Camera {camera.slot} — {positions[camera.slot]}</h2>
-                <label>Calibration JSON
-                  <input type="file" accept=".json,application/json" onChange={(event) => {
-                    loadFile(camera.slot, event.target.files?.[0]);
-                    event.target.value = "";
-                  }} />
-                </label>
-                {camera.filename && <p>Assigned file: {camera.filename}</p>}
-                <div className="skeleton-3d-settings__dimensions">
-                  <label>Calibration width (px)
-                    <input type="number" min="1" max="32768" required value={camera.image_width} onChange={(event) => changeCamera(camera.slot, { image_width: event.target.value })} />
-                  </label>
-                  <label>Calibration height (px)
-                    <input type="number" min="1" max="32768" required value={camera.image_height} onChange={(event) => changeCamera(camera.slot, { image_height: event.target.value })} />
-                  </label>
-                </div>
-                <label>JSON contents
-                  <textarea rows={7} spellCheck={false} value={camera.json} placeholder="Upload or paste camera calibration JSON" onChange={(event) => changeCamera(camera.slot, { json: event.target.value, filename: "" })} />
-                </label>
-              </section>
-            ))}
+          <section className={s3d("overview")} aria-labelledby="s3d-live-title">
+            <div>
+              <h2 id="s3d-live-title">Live reconstruction</h2>
+              <p>Display the reconstructed skeleton alongside the editable camera views. Changes apply to every task in this project.</p>
+            </div>
+            <label className={s3d("switch")}>
+              <input type="checkbox" checked={enabled} onChange={(event) => { setEnabled(event.target.checked); markChanged(); }} />
+              <span className={s3d("switch-track")} aria-hidden="true" />
+              <span>{enabled ? "Enabled" : "Disabled"}</span>
+            </label>
+          </section>
+
+          <section className={s3d("section")} aria-labelledby="s3d-cameras-title">
+            <div className={s3d("section-header")}>
+              <div>
+                <h2 id="s3d-cameras-title">Camera calibration</h2>
+                <p>Each card matches a position in the mosaic; physical camera names can differ from slot numbers.</p>
+              </div>
+              <span className={s3d("counter") + (invalidCount ? " " + s3d("counter--error") : "")}>
+                {readyCount} / 4 configured
+              </span>
+            </div>
+            <div className={s3d("mosaic")} aria-label="2 by 2 camera positions">
+              {cameras.map((camera) => {
+                const status = statuses[camera.slot];
+                return (
+                  <section key={camera.slot} className={s3d("camera")} aria-labelledby={"camera-" + camera.slot + "-title"}>
+                    <header className={s3d("camera-header")}>
+                      <div className={s3d("slot")}>
+                        <span className={s3d("slot-number")}>{camera.slot + 1}</span>
+                        <div>
+                          <div className={s3d("slot-position")}>{positions[camera.slot]}</div>
+                          <h3 id={"camera-" + camera.slot + "-title"}>Slot {camera.slot}</h3>
+                        </div>
+                      </div>
+                      <span className={s3d("status") + " " + s3d("status--" + status)}>
+                        {status === "ready" ? "Configured" : status === "invalid" ? "Invalid JSON" : "Not configured"}
+                      </span>
+                    </header>
+                    <div className={s3d("camera-body")}>
+                      <label className={s3d("field")}>
+                        <span>Camera name</span>
+                        <input type="text" maxLength={64} value={camera.name} placeholder="camera_0"
+                          onChange={(event) => changeCamera(camera.slot, { name: event.target.value })} />
+                      </label>
+                      <div className={s3d("dimensions")}>
+                        <label className={s3d("field")}>
+                          <span>Width, px</span>
+                          <input type="number" min="1" max="100000" required value={camera.image_width}
+                            onChange={(event) => changeCamera(camera.slot, { image_width: event.target.value })} />
+                        </label>
+                        <span className={s3d("dimension-symbol")} aria-hidden="true">×</span>
+                        <label className={s3d("field")}>
+                          <span>Height, px</span>
+                          <input type="number" min="1" max="100000" required value={camera.image_height}
+                            onChange={(event) => changeCamera(camera.slot, { image_height: event.target.value })} />
+                        </label>
+                      </div>
+                      <div className={s3d("upload-row")}>
+                        <label className={s3d("upload")}>
+                          <input type="file" accept=".json,application/json" aria-label={"Upload calibration for slot " + camera.slot}
+                            onChange={(event) => {
+                              loadFile(camera.slot, event.target.files?.[0]);
+                              event.target.value = "";
+                            }} />
+                          <span aria-hidden="true">↑</span>{camera.json.trim() ? "Replace JSON" : "Upload JSON"}
+                        </label>
+                        <span className={s3d("filename")} title={camera.filename || (status === "ready" ? "Calibration stored in project" : "No calibration uploaded")}>
+                          {camera.filename || (status === "ready" ? "Stored in project" : "No file selected")}
+                        </span>
+                      </div>
+                      <details className={s3d("json-details")}>
+                        <summary>View or edit JSON</summary>
+                        <label className={s3d("field")}>
+                          <span>Calibration data</span>
+                          <textarea rows={8} spellCheck={false} value={camera.json} placeholder="Upload or paste camera calibration JSON"
+                            onChange={(event) => changeCamera(camera.slot, { json: event.target.value, filename: "" })} />
+                        </label>
+                      </details>
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+            <div className={s3d("notice")}>
+              <strong>Coordinate mapping</strong>
+              <p>Upload files to their positions in the image, not numeric camera order. Use the calibration resolution of each camera, not the resolution of the whole mosaic.</p>
+              <details>
+                <summary>Example: Foots recording (3840×2160)</summary>
+                <p>Top left: camera_0 · Top right: camera_2 · Bottom left: camera_3 · Bottom right: camera_1. Each tile uses 1920×1080.</p>
+              </details>
+            </div>
+          </section>
+
+          <section className={s3d("section") + " " + s3d("geometry")} aria-labelledby="s3d-world-title">
+            <div className={s3d("section-header")}>
+              <div>
+                <h2 id="s3d-world-title">World coordinates</h2>
+                <p>Specify the up direction shared by all four cameras.</p>
+              </div>
+            </div>
+            <label className={s3d("field") + " " + s3d("normal")}>
+              <span>Floor normal (x, y, z)</span>
+              <input type="text" value={floorUp} placeholder="0, 0, 1"
+                onChange={(event) => { setFloorUp(event.target.value); markChanged(); }} />
+              <small>For Z-up use <code>0, 0, 1</code>. This is a reference direction; the floor is not estimated automatically.</small>
+            </label>
+            <details className={s3d("technical")}>
+              <summary>Calibration formats and coordinate conventions</summary>
+              <p>Supported: Fit3D intrinsics/extrinsics (T is camera centre), or OpenCV K, R, t, dist (t is world-to-camera translation). All cameras must share world coordinates and units. Reconstruction expects original distorted pixels.</p>
+            </details>
+          </section>
+
+          <div className={s3d("actions")}>
+            <div className={s3d("save-state")} aria-live="polite">
+              {dirty ? "Unsaved changes" : saved ? "Settings saved. Reopen the editor to apply changes." : "Project calibration settings"}
+            </div>
+            <button className={s3d("save")} type="submit" disabled={busy || !dirty}>
+              {busy ? "Saving…" : "Save changes"}
+            </button>
           </div>
-          <p>Use each camera's calibration resolution, not the size of the whole mosaic or browser preview. The default 1280×720 must be checked against your calibration.</p>
-          <label>Floor normal in calibration world coordinates (x, y, z)
-            <input type="text" value={floorUp} onChange={(event) => { setFloorUp(event.target.value); setSaved(false); }} />
-          </label>
-          <p>The normal determines the foot-angle reference. All cameras must share the same world coordinate system and units. This setting does not estimate or verify the floor.</p>
-          <p>Supported: Fit3D-style intrinsics/extrinsics JSON (T is the camera centre), or OpenCV K, R, t, dist (t is world-to-camera translation). Raw, distorted mosaic images are expected.</p>
-          <button type="submit">{busy ? "Saving…" : "Save 3D settings"}</button>
         </fieldset>
-        {error && <p role="alert" className="skeleton-3d-settings__error">{error}</p>}
-        {saved && <p role="status">Saved. Reopen the labeling editor to load the new calibration.</p>}
+        {error && <div role="alert" className={s3d("error")}>{error}</div>}
       </form>
     </div>
   );

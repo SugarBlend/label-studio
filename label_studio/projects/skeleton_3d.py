@@ -102,12 +102,15 @@ def validate_config(value):
         raise ValueError('Provide exactly four cameras (or none while disabled)')
     slots = set()
     for camera in cameras:
-        if not isinstance(camera, dict) or set(camera) - {'slot', 'image_width', 'image_height', 'calibration'}:
+        if not isinstance(camera, dict) or set(camera) - {'slot', 'name', 'image_width', 'image_height', 'calibration'}:
             raise ValueError('Each camera requires slot, image_width, image_height, calibration')
         slot = camera.get('slot')
         if type(slot) is not int or slot not in range(4) or slot in slots:
             raise ValueError('Camera slots must be unique integers 0..3 in row-major mosaic order')
         slots.add(slot)
+        name = camera.get('name', f'camera_{slot}')
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 64:
+            raise ValueError('Camera name must be a nonempty string of at most 64 characters')
         for name in ('image_width', 'image_height'):
             if type(camera.get(name)) is not int or not 1 <= camera[name] <= 100000:
                 raise ValueError(f'{name} must be an integer in 1..100000')

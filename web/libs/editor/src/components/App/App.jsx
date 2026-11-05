@@ -157,16 +157,19 @@ class App extends Component {
     return (
       <div
         key={(as.selectedHistory ?? as.selected)?.id}
-        className={cn("main-view").toClassName()}
+        className={`${cn("main-view").toClassName()}${skeleton3d?.enabled ? " main-view--skeleton3d" : ""}`}
         onScrollCapture={this._notifyScroll}
       >
+        {skeleton3d?.enabled && (
+          <div className="main-view__skeleton-panel">
+            <Skeleton3D store={this.props.store} config={skeleton3d} docked />
+          </div>
+        )}
         <div className={cn("main-view").elem("annotation").toClassName()}>
           {<Annotation root={root} annotation={as.selected} />}
           {this.renderRelations(as.selected)}
           {this.renderCommentsOverlay(as.selected)}
         </div>
-        {/* The 3D window is position: fixed, so it stays out of the annotation layout. */}
-        {skeleton3d?.enabled && <Skeleton3D store={this.props.store} config={skeleton3d} />}
       </div>
     );
   }
