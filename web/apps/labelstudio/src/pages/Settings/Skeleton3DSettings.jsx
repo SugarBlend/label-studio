@@ -8,7 +8,8 @@ const rowsFromConfig = (config) => positions.map((_, slot) => {
   const camera = config?.cameras?.find((camera) => camera.slot === slot);
   return {
     slot,
-    image_width: camera?.image_width ?? 1280,
+    name: camera?.name ?? `camera_${slot}`,
+    image_width: camera?.image_width ?? 1920,
     image_height: camera?.image_height ?? 720,
     json: camera?.calibration ? JSON.stringify(camera.calibration, null, 2) : "",
     filename: "",
@@ -48,7 +49,11 @@ export const Skeleton3DSettings = () => {
       const data = JSON.parse(text);
       if (!data || Array.isArray(data) || typeof data !== "object") throw new Error("Expected a JSON object.");
       // A filename never determines the mosaic slot: the user assigns it explicitly.
-      changeCamera(slot, { json: JSON.stringify(data, null, 2), filename: file.name });
+      const match = file.name.match(/camera[_-]?(\d+)/i);
+      changeCamera(slot, {
+        json: JSON.stringify(data, null, 2), filename: file.name,
+        ...(match ? { name: `camera_${match[1]}` } : {}),
+      });
     } catch (err) {
       setError(`Camera ${slot}: ${err.message}`);
     }
@@ -71,7 +76,7 @@ export const Skeleton3DSettings = () => {
           throw new Error(`Camera ${row.slot}: enter the calibration image width and height in pixels.`);
         }
         try {
-          return { slot: row.slot, image_width: width, image_height: height, calibration: JSON.parse(row.json) };
+          return { slot: row.slot, name: row.name.trim(), image_width: width, image_height: height, calibration: JSON.parse(row.json) };
         } catch {
           throw new Error(`Camera ${row.slot}: invalid JSON.`);
         }
@@ -110,6 +115,9 @@ export const Skeleton3DSettings = () => {
             {cameras.map((camera) => (
               <section key={camera.slot} aria-labelledby={`camera-${camera.slot}-title`}>
                 <h2 id={`camera-${camera.slot}-title`}>Camera {camera.slot} — {positions[camera.slot]}</h2>
+                <label>Camera name
+                  <input type="text" maxLength={64} value={camera.name} onChange={(event) => changeCamera(camera.slot, { name: event.target.value })} />
+                </label>
                 <label>Calibration JSON
                   <input type="file" accept=".json,application/json" onChange={(event) => {
                     loadFile(camera.slot, event.target.files?.[0]);
@@ -131,7 +139,8 @@ export const Skeleton3DSettings = () => {
               </section>
             ))}
           </div>
-          <p>Use each camera's calibration resolution, not the size of the whole mosaic or browser preview. The default 1280×720 must be checked against your calibration.</p>
+          <p>Use each camera's calibration resolution, not the size of the whole mosaic or browser preview. The suggested 1920×1080 is for the supplied 3840×2160 mosaic and must be verified for other recordings.</p>
+          <p>For the supplied Foots sequence: top left = camera_0, top right = camera_2, bottom left = camera_3, bottom right = camera_1. Uploading a camera_N.json file automatically fills its label; verify the slot before saving.</p>
           <label>Floor normal in calibration world coordinates (x, y, z)
             <input type="text" value={floorUp} onChange={(event) => { setFloorUp(event.target.value); setSaved(false); }} />
           </label>
