@@ -276,7 +276,7 @@ export function SkeletonCanvas3D({ data, config, docked = false, history = [] })
     if (!element) return undefined;
     const wheel = (event) => {
       event.preventDefault();
-      setView((old) => ({ ...old, zoom: Math.max(0.3, Math.min(6, old.zoom * Math.exp(-event.deltaY * 0.001)))) }));
+      setView((old) => ({ ...old, zoom: Math.max(0.3, Math.min(6, old.zoom * Math.exp(-event.deltaY * 0.001))) }));
     };
     const preventMenu = (event) => event.preventDefault();
     element.addEventListener("wheel", wheel, { passive: false });
