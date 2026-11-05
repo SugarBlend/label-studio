@@ -1,4 +1,5 @@
 import React from "react";
+import { getEnv } from "mobx-state-tree";
 import { observer } from "mobx-react";
 import { Layer, Line, Rect, Text } from "react-konva";
 import { normalizeJoint } from "../Skeleton3D/adapter";
@@ -14,6 +15,7 @@ import { colorOf, standardEdges, sideOf } from "../Skeleton3D/topology";
  */
 export const CameraMosaicOverlay = observer(({ item }) => {
   const image = item.currentImageEntity;
+  const cameraConfig = getEnv(item.store).skeleton3d;
   const width = image?.naturalWidth * item.stageZoom;
   const height = image?.naturalHeight * item.stageZoom;
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
@@ -53,7 +55,7 @@ export const CameraMosaicOverlay = observer(({ item }) => {
             <Text
               x={x + 11}
               y={y + 7}
-              text={`camera_${slot}  ·  ${counts[slot]} joints`}
+              text={`${cameraConfig?.cameras?.find((camera) => camera.slot === slot)?.name || `slot_${slot}`}  ·  ${counts[slot]} joints`}
               fontFamily="Arial"
               fontStyle="bold"
               fontSize={12}
