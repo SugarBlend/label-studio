@@ -89,3 +89,13 @@ def ensure_project_access(user, project) -> None:
 def ensure_org_admin(user, organization=None, message='Only organization admins can do this') -> None:
     if is_access_control_enabled() and not is_org_admin(user, organization):
         raise PermissionDenied(message)
+
+
+def ensure_project_settings_admin(user, organization=None) -> None:
+    """Project configuration is owner/admin-only, regardless of access-control feature flags.
+
+    The organization owner, organization admins, and site superusers are permitted.
+    Ordinary project members can still label and use the Data Manager.
+    """
+    if not is_org_admin(user, organization):
+        raise PermissionDenied('Only the organization owner or admins can manage project settings')
