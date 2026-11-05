@@ -11,6 +11,7 @@ from django.conf import settings
 from drf_spectacular.utils import extend_schema
 from io_storages.serializers import ExportStorageSerializer, ImportStorageSerializer
 from projects.models import Project
+from projects.access import ensure_project_settings_admin
 from rest_framework import generics, status
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -48,6 +49,8 @@ class ImportStorageListAPI(generics.ListCreateAPIView):
         project = serializer.validated_data.get('project')
         if project is not None and not project.has_permission(self.request.user):
             raise PermissionDenied('You do not have permission to create storages for this project.')
+        if project is not None:
+            ensure_project_settings_admin(self.request.user, project.organization)
         super().perform_create(serializer)
 
 
@@ -62,6 +65,14 @@ class ImportStorageDetailAPI(generics.RetrieveUpdateDestroyAPIView):
     )
     parser_classes = (JSONParser, FormParser, MultiPartParser)
     serializer_class = ImportStorageSerializer
+
+    def perform_update(self, serializer):
+        ensure_project_settings_admin(self.request.user, self.get_object().project.organization)
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        ensure_project_settings_admin(self.request.user, instance.project.organization)
+        super().perform_destroy(instance)
 
     @extend_schema(exclude=True)
     def put(self, request, *args, **kwargs):
@@ -97,6 +108,8 @@ class ExportStorageListAPI(generics.ListCreateAPIView):
         project = serializer.validated_data.get('project')
         if project is not None and not project.has_permission(self.request.user):
             raise PermissionDenied('You do not have permission to create storages for this project.')
+        if project is not None:
+            ensure_project_settings_admin(self.request.user, project.organization)
 
         # double check: not export storages don't validate connection in serializer,
         # just make another explicit check here, note: in this create API we have credentials in request.data
@@ -122,6 +135,14 @@ class ExportStorageDetailAPI(generics.RetrieveUpdateDestroyAPIView):
     )
     parser_classes = (JSONParser, FormParser, MultiPartParser)
     serializer_class = ExportStorageSerializer
+
+    def perform_update(self, serializer):
+        ensure_project_settings_admin(self.request.user, self.get_object().project.organization)
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        ensure_project_settings_admin(self.request.user, instance.project.organization)
+        super().perform_destroy(instance)
 
     @extend_schema(exclude=True)
     def put(self, request, *args, **kwargs):
