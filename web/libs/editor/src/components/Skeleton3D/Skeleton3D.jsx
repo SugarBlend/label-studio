@@ -56,7 +56,8 @@ export function SkeletonView({ data, docked = false }) {
   const distance = 3.1 * radius;
   const eye = add(target, scale(direction, distance));
   const forward = unit(sub(target, eye));
-  const camRight = unit(cross(forward, up));
+  // Positions have already been rotated into floor-up coordinates.
+  const camRight = unit(cross(forward, [0, 0, 1]));
   const camUp = cross(camRight, forward);
   const focal = 1.35 * Math.min(W, H);
   const arrow = (p) => {
@@ -112,7 +113,7 @@ export function SkeletonView({ data, docked = false }) {
     let x = sole.center[0] + outward * 15;
     if (anchor === "start" && x > W - 210) { anchor = "end"; x = sole.center[0] - 15; }
     if (anchor === "end" && x < 210) { anchor = "start"; x = sole.center[0] + 15; }
-    const y = Math.min(H - 8, sole.center[1] + (sole.side === "l" ? 26 : 46));
+    const y = Math.max(90, Math.min(H - 8, sole.center[1] + (sole.side === "l" ? 26 : 46)));
     return {
       ...sole, anchor, x, y,
       color: sole.side === "l" ? LEFT : RIGHT,
@@ -275,7 +276,7 @@ export function Skeleton3D({ store, config, docked = false }) {
         display: "flex", flexDirection: "column", background: "#ffffff",
       }}>
       <header
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", cursor: "grab", userSelect: "none", borderBottom: panel.collapsed ? "none" : "1px solid #e2e8f0" }}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", cursor: docked ? "default" : "grab", userSelect: "none", borderBottom: panel.collapsed && !docked ? "none" : "1px solid #e2e8f0" }}
         onPointerDown={(event) => {
           if (docked || event.target.closest("button")) return;
           const rect = box.current?.getBoundingClientRect();
@@ -299,7 +300,7 @@ export function Skeleton3D({ store, config, docked = false }) {
         onPointerCancel={() => { moving.current = null; }}>
         <strong style={{ fontSize: 13 }}>3D skeleton</strong>
         <span style={{ fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {panel.collapsed ? angles : status}
+          {panel.collapsed && !docked ? angles : status}
         </span>
         {warnings.length > 0 && <span title="Warnings" style={{ fontSize: 11, color: "#b45309" }}>⚠{warnings.length}</span>}
         <span style={{ flex: 1 }} />
