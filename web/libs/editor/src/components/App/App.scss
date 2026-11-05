@@ -208,3 +208,19 @@ body {
     }
   }
 }
+
+// When 3D is detached, only the native 2D annotation editor remains in the
+// main window. The React portal continues rendering live into its own window.
+.main-view--skeleton3d.main-view--skeleton3d-detached {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+
+  > .main-view__skeleton-panel {
+    display: none;
+  }
+
+  > .main-view__annotation {
+    border-left: 0;
+    min-width: 0;
+  }
+}
