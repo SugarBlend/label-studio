@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAPI } from "../../providers/ApiProvider";
 import { useProject } from "../../providers/ProjectProvider";
+import { cn } from "../../utils/bem";
 import "./Skeleton3DSettings.scss";
 
 const positions = ["Top left", "Top right", "Bottom left", "Bottom right"];
+
+// This project's SCSS loader scopes classes with the "lsf-" prefix.
+// Use the same BEM helper as the other settings pages, instead of literal names.
+const s3d = (element) => cn("skeleton-3d-settings", element ? { elem: element } : {}).toClassName();
 const rowsFromConfig = (config) => positions.map((_, slot) => {
   const camera = config?.cameras?.find((camera) => camera.slot === slot);
   return {
@@ -127,74 +132,74 @@ export const Skeleton3DSettings = () => {
   };
 
   return (
-    <div className="skeleton-3d-settings">
-      <header className="skeleton-3d-settings__header">
-        <div className="skeleton-3d-settings__eyebrow">Project settings / Multiview</div>
+    <div className={s3d()}>
+      <header className={s3d("header")}>
+        <div className={s3d("eyebrow")}>Project settings / Multiview</div>
         <h1>3D skeleton</h1>
         <p>Configure a single 2×2 camera mosaic for live 3D reconstruction while annotating.</p>
       </header>
       <form onSubmit={save}>
         <fieldset disabled={busy}>
-          <section className="skeleton-3d-settings__overview" aria-labelledby="s3d-live-title">
+          <section className={s3d("overview")} aria-labelledby="s3d-live-title">
             <div>
               <h2 id="s3d-live-title">Live reconstruction</h2>
               <p>Display the reconstructed skeleton alongside the editable camera views. Changes apply to every task in this project.</p>
             </div>
-            <label className="skeleton-3d-settings__switch">
+            <label className={s3d("switch")}>
               <input type="checkbox" checked={enabled} onChange={(event) => { setEnabled(event.target.checked); markChanged(); }} />
-              <span className="skeleton-3d-settings__switch-track" aria-hidden="true" />
+              <span className={s3d("switch-track")} aria-hidden="true" />
               <span>{enabled ? "Enabled" : "Disabled"}</span>
             </label>
           </section>
 
-          <section className="skeleton-3d-settings__section" aria-labelledby="s3d-cameras-title">
-            <div className="skeleton-3d-settings__section-header">
+          <section className={s3d("section")} aria-labelledby="s3d-cameras-title">
+            <div className={s3d("section-header")}>
               <div>
                 <h2 id="s3d-cameras-title">Camera calibration</h2>
                 <p>Each card matches a position in the mosaic; physical camera names can differ from slot numbers.</p>
               </div>
-              <span className={"skeleton-3d-settings__counter" + (invalidCount ? " skeleton-3d-settings__counter--error" : "")}>
+              <span className={s3d("counter") + (invalidCount ? " " + s3d("counter--error") : "")}>
                 {readyCount} / 4 configured
               </span>
             </div>
-            <div className="skeleton-3d-settings__mosaic" aria-label="2 by 2 camera positions">
+            <div className={s3d("mosaic")} aria-label="2 by 2 camera positions">
               {cameras.map((camera) => {
                 const status = statuses[camera.slot];
                 return (
-                  <section key={camera.slot} className="skeleton-3d-settings__camera" aria-labelledby={"camera-" + camera.slot + "-title"}>
-                    <header className="skeleton-3d-settings__camera-header">
-                      <div className="skeleton-3d-settings__slot">
-                        <span className="skeleton-3d-settings__slot-number">{camera.slot + 1}</span>
+                  <section key={camera.slot} className={s3d("camera")} aria-labelledby={"camera-" + camera.slot + "-title"}>
+                    <header className={s3d("camera-header")}>
+                      <div className={s3d("slot")}>
+                        <span className={s3d("slot-number")}>{camera.slot + 1}</span>
                         <div>
-                          <div className="skeleton-3d-settings__slot-position">{positions[camera.slot]}</div>
+                          <div className={s3d("slot-position")}>{positions[camera.slot]}</div>
                           <h3 id={"camera-" + camera.slot + "-title"}>Slot {camera.slot}</h3>
                         </div>
                       </div>
-                      <span className={"skeleton-3d-settings__status skeleton-3d-settings__status--" + status}>
+                      <span className={s3d("status") + " " + s3d("status--" + status)}>
                         {status === "ready" ? "Configured" : status === "invalid" ? "Invalid JSON" : "Not configured"}
                       </span>
                     </header>
-                    <div className="skeleton-3d-settings__camera-body">
-                      <label className="skeleton-3d-settings__field">
+                    <div className={s3d("camera-body")}>
+                      <label className={s3d("field")}>
                         <span>Camera name</span>
                         <input type="text" maxLength={64} value={camera.name} placeholder="camera_0"
                           onChange={(event) => changeCamera(camera.slot, { name: event.target.value })} />
                       </label>
-                      <div className="skeleton-3d-settings__dimensions">
-                        <label className="skeleton-3d-settings__field">
+                      <div className={s3d("dimensions")}>
+                        <label className={s3d("field")}>
                           <span>Width, px</span>
                           <input type="number" min="1" max="100000" required value={camera.image_width}
                             onChange={(event) => changeCamera(camera.slot, { image_width: event.target.value })} />
                         </label>
-                        <span className="skeleton-3d-settings__dimension-symbol" aria-hidden="true">×</span>
-                        <label className="skeleton-3d-settings__field">
+                        <span className={s3d("dimension-symbol")} aria-hidden="true">×</span>
+                        <label className={s3d("field")}>
                           <span>Height, px</span>
                           <input type="number" min="1" max="100000" required value={camera.image_height}
                             onChange={(event) => changeCamera(camera.slot, { image_height: event.target.value })} />
                         </label>
                       </div>
-                      <div className="skeleton-3d-settings__upload-row">
-                        <label className="skeleton-3d-settings__upload">
+                      <div className={s3d("upload-row")}>
+                        <label className={s3d("upload")}>
                           <input type="file" accept=".json,application/json" aria-label={"Upload calibration for slot " + camera.slot}
                             onChange={(event) => {
                               loadFile(camera.slot, event.target.files?.[0]);
@@ -202,13 +207,13 @@ export const Skeleton3DSettings = () => {
                             }} />
                           <span aria-hidden="true">↑</span>{camera.json.trim() ? "Replace JSON" : "Upload JSON"}
                         </label>
-                        <span className="skeleton-3d-settings__filename" title={camera.filename || (status === "ready" ? "Calibration stored in project" : "No calibration uploaded")}>
+                        <span className={s3d("filename")} title={camera.filename || (status === "ready" ? "Calibration stored in project" : "No calibration uploaded")}>
                           {camera.filename || (status === "ready" ? "Stored in project" : "No file selected")}
                         </span>
                       </div>
-                      <details className="skeleton-3d-settings__json-details">
+                      <details className={s3d("json-details")}>
                         <summary>View or edit JSON</summary>
-                        <label className="skeleton-3d-settings__field">
+                        <label className={s3d("field")}>
                           <span>Calibration data</span>
                           <textarea rows={8} spellCheck={false} value={camera.json} placeholder="Upload or paste camera calibration JSON"
                             onChange={(event) => changeCamera(camera.slot, { json: event.target.value, filename: "" })} />
@@ -219,7 +224,7 @@ export const Skeleton3DSettings = () => {
                 );
               })}
             </div>
-            <div className="skeleton-3d-settings__notice">
+            <div className={s3d("notice")}>
               <strong>Coordinate mapping</strong>
               <p>Upload files to their positions in the image, not numeric camera order. Use the calibration resolution of each camera, not the resolution of the whole mosaic.</p>
               <details>
@@ -229,35 +234,35 @@ export const Skeleton3DSettings = () => {
             </div>
           </section>
 
-          <section className="skeleton-3d-settings__section skeleton-3d-settings__geometry" aria-labelledby="s3d-world-title">
-            <div className="skeleton-3d-settings__section-header">
+          <section className={s3d("section") + " " + s3d("geometry")} aria-labelledby="s3d-world-title">
+            <div className={s3d("section-header")}>
               <div>
                 <h2 id="s3d-world-title">World coordinates</h2>
                 <p>Specify the up direction shared by all four cameras.</p>
               </div>
             </div>
-            <label className="skeleton-3d-settings__field skeleton-3d-settings__normal">
+            <label className={s3d("field") + " " + s3d("normal")}>
               <span>Floor normal (x, y, z)</span>
               <input type="text" value={floorUp} placeholder="0, 0, 1"
                 onChange={(event) => { setFloorUp(event.target.value); markChanged(); }} />
               <small>For Z-up use <code>0, 0, 1</code>. This is a reference direction; the floor is not estimated automatically.</small>
             </label>
-            <details className="skeleton-3d-settings__technical">
+            <details className={s3d("technical")}>
               <summary>Calibration formats and coordinate conventions</summary>
               <p>Supported: Fit3D intrinsics/extrinsics (T is camera centre), or OpenCV K, R, t, dist (t is world-to-camera translation). All cameras must share world coordinates and units. Reconstruction expects original distorted pixels.</p>
             </details>
           </section>
 
-          <div className="skeleton-3d-settings__actions">
-            <div className="skeleton-3d-settings__save-state" aria-live="polite">
+          <div className={s3d("actions")}>
+            <div className={s3d("save-state")} aria-live="polite">
               {dirty ? "Unsaved changes" : saved ? "Settings saved. Reopen the editor to apply changes." : "Project calibration settings"}
             </div>
-            <button className="skeleton-3d-settings__save" type="submit" disabled={busy || !dirty}>
+            <button className={s3d("save")} type="submit" disabled={busy || !dirty}>
               {busy ? "Saving…" : "Save changes"}
             </button>
           </div>
         </fieldset>
-        {error && <div role="alert" className="skeleton-3d-settings__error">{error}</div>}
+        {error && <div role="alert" className={s3d("error")}>{error}</div>}
       </form>
     </div>
   );
