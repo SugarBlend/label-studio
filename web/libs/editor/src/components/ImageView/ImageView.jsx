@@ -24,6 +24,7 @@ import { FF_DEV_1442, FF_LSDV_4930, FF_ZOOM_OPTIM, isFF } from "../../utils/feat
 import { Pagination } from "../../common/Pagination/Pagination";
 import { Image } from "./Image";
 import { SkeletonRelationsLayer } from "./SkeletonRelationsLayer";
+import { CameraMosaicOverlay } from "./CameraMosaicOverlay";
 
 Konva.showWarnings = false;
 
@@ -1433,6 +1434,7 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
   return (
     <>
       <ImageLayer item={item} />
+      {getEnv(store).skeleton3d?.enabled && <CameraMosaicOverlay item={item} />}
       {item.grid && item.sizeUpdated && <ImageGrid item={item} />}
 
       {isFF(FF_LSDV_4930) ? <TransformerBack item={item} /> : null}
