@@ -204,6 +204,14 @@ class ProjectSerializer(FlexFieldsModelSerializer):
 
         return data
 
+    def validate_skeleton_3d_config(self, value):
+        from projects.skeleton_3d import validate_config
+
+        try:
+            return validate_config(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+
     def validate_color(self, value):
         # color : "#FF4C25"
         if value.startswith('#') and len(value) == 7:
@@ -226,6 +234,7 @@ class ProjectSerializer(FlexFieldsModelSerializer):
             'title',
             'description',
             'label_config',
+            'skeleton_3d_config',
             'expert_instruction',
             'show_instruction',
             'show_skip_button',

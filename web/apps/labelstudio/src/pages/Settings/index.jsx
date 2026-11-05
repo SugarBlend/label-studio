@@ -8,6 +8,7 @@ import { LabelingSettings } from "./LabelingSettings";
 import { MachineLearningSettings } from "./MachineLearningSettings/MachineLearningSettings";
 import { PredictionsSettings } from "./PredictionsSettings/PredictionsSettings";
 import { StorageSettings } from "./StorageSettings/StorageSettings";
+import { Skeleton3DSettings } from "./Skeleton3DSettings";
 import "./settings.scss";
 
 export const MenuLayout = ({ children, ...routeProps }) => {
@@ -19,6 +20,7 @@ export const MenuLayout = ({ children, ...routeProps }) => {
       menuItems={[
         GeneralSettings,
         LabelingSettings,
+        Skeleton3DSettings,
         AnnotationSettings,
         MachineLearningSettings,
         PredictionsSettings,
@@ -36,6 +38,7 @@ export const MenuLayout = ({ children, ...routeProps }) => {
 const pages = {
   AnnotationSettings,
   LabelingSettings,
+  Skeleton3DSettings,
   MachineLearningSettings,
   PredictionsSettings,
   StorageSettings,

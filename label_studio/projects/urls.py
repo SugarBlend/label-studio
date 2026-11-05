@@ -19,6 +19,7 @@ _api_urlpatterns = [
     path('', api.ProjectListAPI.as_view(), name='project-list'),
     path('<int:pk>/', api.ProjectAPI.as_view(), name='project-detail'),
     path('counts/', api.ProjectCountsListAPI.as_view(), name='project-counts-list'),
+    path('<int:pk>/skeleton-3d/reconstruct/', api.Skeleton3DReconstructAPI.as_view(), name='skeleton-3d-reconstruct'),
     # Get next task
     path('<int:pk>/next/', api.ProjectNextTaskAPI.as_view(), name='project-next'),
     # Label stream history

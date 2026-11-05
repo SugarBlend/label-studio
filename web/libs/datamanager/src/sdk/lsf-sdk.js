@@ -239,6 +239,10 @@ export class LSFWrapper {
       queueTotal,
       queuePosition,
       commentClassificationConfig,
+      skeleton3d: {
+        ...this.project.skeleton_3d_config,
+        endpoint: `${window.APP_SETTINGS.hostname || ""}/api/projects/${this.project.id}/skeleton-3d/reconstruct/`,
+      },
 
       /* EVENTS */
       onSubmitDraft: this.onSubmitDraft,

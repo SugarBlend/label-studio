@@ -107,6 +107,37 @@ _task_data_schema = {
 }
 
 
+class Skeleton3DReconstructAPI(generics.GenericAPIView):
+    """Reconstruct current unsaved observations without reading or modifying tasks."""
+
+    parser_classes = (JSONParser,)
+    permission_required = all_permissions.projects_view
+    http_method_names = ['post', 'options']
+
+    def get_queryset(self):
+        return Project.objects.filter(
+            organization=self.request.user.active_organization
+        ).filter(accessible_projects_q(self.request.user))
+
+    def post(self, request, *args, **kwargs):
+        from projects.skeleton_3d import reconstruct
+
+        # get_object checks both scoped queryset and normal object permissions.
+        project = self.get_object()
+        data = request.data
+        if not isinstance(data, dict) or set(data) - {'observations', 'sequence'}:
+            raise RestValidationError('Expected observations and optional sequence only')
+        sequence = data.get('sequence')
+        if sequence is not None and (type(sequence) is not int or not 0 <= sequence <= 9007199254740991):
+            raise RestValidationError('sequence must be a nonnegative safe integer')
+        try:
+            result = reconstruct(project.skeleton_3d_config, data.get('observations'))
+        except ValueError as exc:
+            raise RestValidationError(str(exc)) from exc
+        result['sequence'] = sequence
+        return Response(result)
+
+
 class ProjectListPagination(PageNumberPagination):
     page_size = 30
     page_size_query_param = 'page_size'

@@ -55,6 +55,7 @@ function configureApplication(params) {
     // remove: params.remove || Requests.remover,
 
     // communication with the user
+    skeleton3d: params.skeleton3d,
     settings: params.settings || {},
     messages: { ...Messages, ...params.messages },
 

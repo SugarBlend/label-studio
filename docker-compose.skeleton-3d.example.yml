@@ -1,0 +1,10 @@
+# Copy alongside YOUR EXISTING Compose file; retain its database, mounts and project name.
+# Build this image first from the patched source checkout with `docker build`.
+# Adapt service names if your Compose uses names other than app/nginx.
+services:
+  app:
+    image: sugarblend/label-studio:skeleton-3d
+    pull_policy: never
+  nginx:
+    image: sugarblend/label-studio:skeleton-3d
+    pull_policy: never

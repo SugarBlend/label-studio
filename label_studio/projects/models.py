@@ -53,6 +53,7 @@ from projects.functions import (
 )
 from projects.functions.utils import make_queryset_from_iterable
 from projects.signals import ProjectSignals
+from projects.skeleton_3d import default_skeleton_3d_config
 from rest_framework.exceptions import ValidationError
 from tasks.models import (
     Annotation,
@@ -210,6 +211,9 @@ class Project(ProjectMixin, FsmHistoryStateModel):
         null=True,
         default=None,
         help_text='Parsed label config in JSON format. See more about it in documentation',
+    )
+    skeleton_3d_config = models.JSONField(
+        default=default_skeleton_3d_config, blank=True, help_text='Four-camera skeleton reconstruction configuration'
     )
     label_config_hash = models.BigIntegerField(null=True, default=None)
     expert_instruction = models.TextField(

@@ -77,6 +77,7 @@ function rootElement(element) {
  */
 function configureApplication(params) {
   const options = {
+    skeleton3d: params.skeleton3d,
     settings: params.settings || {},
     messages: { ...Messages, ...params.messages },
     onSubmitAnnotation: params.onSubmitAnnotation ? params.onSubmitAnnotation : External.onSubmitAnnotation,
