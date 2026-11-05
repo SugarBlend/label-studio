@@ -10,7 +10,7 @@ export const useIsOrgAdmin = () => {
   const { user, isLoading } = useAuth();
 
   return {
-    isOrgAdmin: user?.is_org_admin ?? false,
+    isOrgAdmin: user?.is_org_admin ?? true,
     canManageProjectSettings: user?.can_manage_project_settings === true,
     accessControl: user?.project_access_control ?? false,
     isLoading,
