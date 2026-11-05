@@ -43,6 +43,16 @@ class ImportStorageListAPI(generics.ListCreateAPIView):
         StorageClass.ensure_storage_statuses(storages)
         return storages
 
+    def create(self, request, *args, **kwargs):
+        # Authorize before serializer validation, external connection checks or credentials handling.
+        raw_pk = request.data.get('project')
+        if raw_pk is not None:
+            project = generics.get_object_or_404(
+                Project, pk=raw_pk, organization=request.user.active_organization
+            )
+            ensure_project_settings_admin(request.user, project.organization)
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         from rest_framework.exceptions import PermissionDenied
 
@@ -101,6 +111,16 @@ class ExportStorageListAPI(generics.ListCreateAPIView):
         # check failed jobs and sync their statuses
         StorageClass.ensure_storage_statuses(storages)
         return storages
+
+    def create(self, request, *args, **kwargs):
+        # Authorize before serializer validation, external connection checks or credentials handling.
+        raw_pk = request.data.get('project')
+        if raw_pk is not None:
+            project = generics.get_object_or_404(
+                Project, pk=raw_pk, organization=request.user.active_organization
+            )
+            ensure_project_settings_admin(request.user, project.organization)
+        return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         from rest_framework.exceptions import PermissionDenied
