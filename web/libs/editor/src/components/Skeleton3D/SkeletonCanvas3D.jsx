@@ -35,7 +35,8 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
   const bounds = canvas.getBoundingClientRect();
   const w = Math.max(1, bounds.width);
   const h = Math.max(1, bounds.height);
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  // Use the destination window's DPI when the canvas is on another monitor.
+  const dpr = Math.min(2, canvas.ownerDocument?.defaultView?.devicePixelRatio || 1);
   canvas.width = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
   const ctx = canvas.getContext("2d");
@@ -286,7 +287,8 @@ export function SkeletonCanvas3D({
   const setSelectedJoint = onChangeSelectedJoint ?? setInternalSelectedJoint;
 
   useEffect(() => {
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => setDimensions((v) => v + 1)) : null;
+    const Observer = canvas.current?.ownerDocument?.defaultView?.ResizeObserver ?? (typeof ResizeObserver !== "undefined" ? ResizeObserver : null);
+    const observer = Observer ? new Observer(() => setDimensions((v) => v + 1)) : null;
     if (observer && canvas.current) observer.observe(canvas.current);
     const resize = () => setDimensions((v) => v + 1);
     window.addEventListener("resize", resize);
