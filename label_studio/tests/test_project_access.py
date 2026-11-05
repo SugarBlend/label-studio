@@ -236,6 +236,8 @@ def test_org_admin_flag(setup):
     assert r.json()['is_admin'] is True
 
     assert member.get('/api/current-user/whoami').json()['is_org_admin'] is True
+    assert member.get('/api/current-user/whoami').json()['can_manage_project_settings'] is True
+    assert member.get(f'/projects/{project.id}/settings/').status_code == 200
     assert project.id in _project_ids(member)
     assert member.get(f'/api/projects/{project.id}/access/').status_code == 200
 
