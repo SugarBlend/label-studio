@@ -39,6 +39,10 @@ Do not upload this dataset or the Windows `viewer.exe` into the public GitHub re
 - **Size**: change joint and bone thickness
 - **Labels**, **Cameras**, **Rays**, **Shadow**, **Trail**, **Path**, **Soles**: independent visual layers
 - **Joint names**: label individual reconstructed joints
+- **Rays**: click exactly one visible joint in the 3D canvas; only its observing cameras contribute ray segments. Click an empty location to clear selection. No rays are drawn without a selected point.
+- **Open in window ↗**: detach the live 3D canvas into a resizable, same-origin browser window; drag the window to a second monitor. The main Label Studio window then uses its full available width for 2D editing. Click **Return to editor** or close the external window to reattach.
+- The detached 3D scene shares the editor's live state and retains orbit, visible layers and selected joint when reattaching. Browser popups must be allowed for the Label Studio origin.
+- Both ankles connect to the heel, big toe, and small toe. The neck-to-central-hip bone is intentionally absent in 3D; no authored Label Studio Relations are deleted.
 - A small XYZ triad shows 3D orientation
 
 Trail and Path accumulate the latest 90 successful reconstructed poses **during the current task**, e.g. while editing. They are *not yet* a player for all 200 frames. Existing Label Studio task/image navigation is unchanged.
@@ -50,3 +54,16 @@ The viewer's **appearance and pointer interaction** target the provided screensh
 - Geometry mapping for the first COCO image was evaluated separately against all four supplied calibrations.
 - This PR is a **draft**: an end-to-end browser run on a real project, webpack production build, and comparison with the Qt app's actual camera motions are still outstanding.
 - Keep the original `skeleton-lines-stable` branch untouched until smoke testing passes.
+
+
+## Development checks for the next deployment
+
+Run from the checkout root:
+
+```sh
+node --test web/libs/editor/src/components/Skeleton3D/skeleton3d-topology.node-test.mjs
+node --test web/libs/editor/src/components/Skeleton3D/skeleton3d.node-test.mjs
+cd web && yarn run build
+```
+
+The popup's live MobX updates, resizing on a second display, popup-blocking behaviour, and drawing of rays for a selected point require a browser smoke test. The new topology assertions have been added, but the full production build and browser checks have **not** been executed in this environment.
