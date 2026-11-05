@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { reaction } from "mobx";
 import { adaptSkeleton, createReconstructionRunner, readSkeletonSnapshot } from "./adapter";
 import { requestReconstruction } from "./request";
+import { LEFT, RIGHT, BONE, standardEdges, sideOf, colorOf } from "./topology";
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -11,35 +12,20 @@ const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a
 const unit = (a) => { const n = Math.hypot(...a) || 1; return [a[0] / n, a[1] / n, a[2] / n]; };
 const validPosition = (p) => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
 
-const LEFT = "#2f6fd0";
-const RIGHT = "#df7a1c";
-const BONE = "#3b4657";
 const INK = "#25303f";
 const FLOOR = "#dbe2ec";
 const FLOOR_MAJOR = "#b9c6d8";
 const SHADOW = "#c6cdd9";
 
-const standardEdges = [
-  ["l_shoulder", "r_shoulder"], ["l_hip", "r_hip"],
-  ...["l", "r"].flatMap((s) => [
-    [`${s}_shoulder`, `${s}_elbow`], [`${s}_elbow`, `${s}_wrist`],
-    [`${s}_shoulder`, `${s}_hip`], [`${s}_hip`, `${s}_knee`], [`${s}_knee`, `${s}_ankle`],
-    [`${s}_ankle`, `${s}_heel`], [`${s}_heel`, `${s}_big_toe`],
-    [`${s}_heel`, `${s}_small_toe`], [`${s}_big_toe`, `${s}_small_toe`],
-  ]),
-];
-
-const sideOf = (joint) => (joint.startsWith("l_") ? "l" : joint.startsWith("r_") ? "r" : "");
-const colorOf = (joint) => (sideOf(joint) === "l" ? LEFT : sideOf(joint) === "r" ? RIGHT : BONE);
 const formatAngle = (value) => (Number.isFinite(value) ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)}°` : "n/a");
 
 /** Orbit camera, perspective projection. The floor plane is z = 0 in the calibration frame. */
-export function SkeletonView({ data }) {
+export function SkeletonView({ data, docked = false }) {
   const [view, setView] = useState({ yaw: -1.15, pitch: 0.34, zoom: 1.25 });
   const drag = useRef(null);
   const svg = useRef(null);
   const W = 640;
-  const H = 400;
+  const H = docked ? 700 : 400;
 
   useEffect(() => {
     const el = svg.current;
@@ -52,6 +38,7 @@ export function SkeletonView({ data }) {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
+  const [layers, setLayers] = useState({ grid: true, shadows: true, soles: true, labels: true });
   const { joints, edges } = useMemo(() => {
     const unique = new Map([...standardEdges, ...(data.edges ?? [])].map((e) => [e.slice().sort().join("|"), e]));
     return { joints: data.joints.filter((j) => validPosition(j.position)), edges: [...unique.values()] };
@@ -159,18 +146,18 @@ export function SkeletonView({ data }) {
         onPointerCancel={() => { drag.current = null; }}
         onDoubleClick={() => setView({ yaw: -1.15, pitch: 0.26, zoom: 1 })}>
         <title>Reconstructed skeleton, floor grid and foot angles</title>
-        {grid.map((line) => (
+        {layers.grid && grid.map((line) => (
           <line key={line.key} x1={line.a[0]} y1={line.a[1]} x2={line.b[0]} y2={line.b[1]}
             stroke={line.major ? FLOOR_MAJOR : FLOOR} strokeWidth={line.major ? 1.1 : 0.8} />
         ))}
-        {shadow.map((line) => (
+        {layers.shadows && shadow.map((line) => (
           <line key={line.key} x1={line.a[0]} y1={line.a[1]} x2={line.b[0]} y2={line.b[1]} stroke={SHADOW} strokeWidth={4} strokeLinecap="round" />
         ))}
         {edges.map(([a, b]) => (nodes.has(a) && nodes.has(b)
           ? <line key={`${a}:${b}`} x1={nodes.get(a)[0]} y1={nodes.get(a)[1]} x2={nodes.get(b)[0]} y2={nodes.get(b)[1]}
             stroke={sideOf(a) && sideOf(a) === sideOf(b) ? colorOf(a) : BONE} strokeWidth={4} strokeLinecap="round" />
           : null))}
-        {soles.map((sole) => (
+        {layers.soles && soles.map((sole) => (
           <polygon key={sole.side} points={sole.points} fill={sole.side === "l" ? LEFT : RIGHT} fillOpacity={0.22}
             stroke={sole.side === "l" ? LEFT : RIGHT} strokeWidth={1.2} />
         ))}
@@ -184,7 +171,7 @@ export function SkeletonView({ data }) {
             </g>
           );
         })}
-        {footLabels.map((label) => (
+        {layers.labels && footLabels.map((label) => (
           <g key={`label:${label.side}`}>
             <line x1={label.center[0]} y1={label.center[1]} x2={label.x} y2={label.y - 5} stroke={label.color} strokeWidth={1} />
             <text x={label.x} y={label.y} fontSize="16" fontWeight="600" textAnchor={label.anchor} fill={label.color}>
@@ -200,7 +187,12 @@ export function SkeletonView({ data }) {
           <text x={14} y={68} fontSize="15" fill={RIGHT}>{`R forefoot tilt: ${formatAngle(data.foot_tilt?.right)}`}</text>
         </g>
       </svg>
-      <div style={{ display: "flex", gap: 6, marginTop: 6, fontSize: 12 }}>
+      <div style={{ display: "flex", gap: 6, marginTop: 6, fontSize: 12, flexWrap: "wrap" }}>
+        {Object.entries({ grid: "Grid", shadows: "Shadow", soles: "Soles", labels: "Labels" }).map(([key, label]) => (
+          <label key={key} style={{ display: "inline-flex", alignItems: "center", gap: 3, marginRight: 6 }}>
+            <input type="checkbox" checked={layers[key]} onChange={(event) => setLayers((old) => ({ ...old, [key]: event.target.checked }))} />{label}
+          </label>
+        ))}
         <button type="button" onClick={() => setView((v) => ({ ...v, yaw: v.yaw - 0.2 }))}>Rotate left</button>
         <button type="button" onClick={() => setView((v) => ({ ...v, yaw: v.yaw + 0.2 }))}>Rotate right</button>
         <button type="button" onClick={() => setView((v) => ({ ...v, zoom: Math.min(5, v.zoom * 1.25) }))}>Zoom in</button>
@@ -225,7 +217,7 @@ const readPanelState = () => {
 };
 
 /** Floating read-only window: the 3D view stays visible next to the mosaic while labelling. */
-export function Skeleton3D({ store, config }) {
+export function Skeleton3D({ store, config, docked = false }) {
   const [state, setState] = useState({ status: "pending", data: null });
   const [panel, setPanel] = useState(readPanelState);
   const box = useRef(null);
@@ -273,14 +265,19 @@ export function Skeleton3D({ store, config }) {
   return (
     <section ref={box} aria-label="Live 3D skeleton"
       style={{
-        position: "fixed", zIndex: 1200, width: "min(440px, 92vw)", maxHeight: "80vh", display: "flex", flexDirection: "column",
-        background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: 8, boxShadow: "0 10px 28px rgba(15, 23, 42, 0.18)",
-        ...(panel.position ? { left: panel.position.left, top: panel.position.top } : { right: 16, bottom: 16 }),
+        ...(docked ? {
+          position: "relative", width: "100%", minHeight: "100%", maxHeight: "none", border: "none", borderRadius: 0, boxShadow: "none",
+        } : {
+          position: "fixed", zIndex: 1200, width: "min(440px, 92vw)", maxHeight: "80vh",
+          border: "1px solid #cbd5e1", borderRadius: 8, boxShadow: "0 10px 28px rgba(15, 23, 42, 0.18)",
+          ...(panel.position ? { left: panel.position.left, top: panel.position.top } : { right: 16, bottom: 16 }),
+        }),
+        display: "flex", flexDirection: "column", background: "#ffffff",
       }}>
       <header
         style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", cursor: "grab", userSelect: "none", borderBottom: panel.collapsed ? "none" : "1px solid #e2e8f0" }}
         onPointerDown={(event) => {
-          if (event.target.closest("button")) return;
+          if (docked || event.target.closest("button")) return;
           const rect = box.current?.getBoundingClientRect();
           if (!rect) return;
           moving.current = { dx: event.clientX - rect.left, dy: event.clientY - rect.top };
@@ -306,16 +303,16 @@ export function Skeleton3D({ store, config }) {
         </span>
         {warnings.length > 0 && <span title="Warnings" style={{ fontSize: 11, color: "#b45309" }}>⚠{warnings.length}</span>}
         <span style={{ flex: 1 }} />
-        <button type="button" aria-expanded={!panel.collapsed} title={panel.collapsed ? "Expand" : "Collapse"}
+        {!docked && <button type="button" aria-expanded={!panel.collapsed} title={panel.collapsed ? "Expand" : "Collapse"}
           onClick={() => setPanel((current) => ({ ...current, collapsed: !current.collapsed }))}
           style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "2px 6px" }}>
           {panel.collapsed ? "▢" : "–"}
-        </button>
+        </button>}
       </header>
-      {!panel.collapsed && (
+      {(docked || !panel.collapsed) && (
         <div style={{ padding: "8px 10px 10px", overflow: "auto" }}>
           <div role="status" aria-live="polite" style={{ fontSize: 12, color: "#b91c1c" }}>{state.error}</div>
-          {data && <SkeletonView data={data} />}
+          {data && <SkeletonView data={data} docked={docked} />}
           {!data && <p style={{ fontSize: 12, color: "#475569" }}>Waiting for keypoints in at least two camera slots.</p>}
           <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
             Triangulation only, no fitting. Geometric angle, not a clinical assessment; positive means the big toe is higher.
