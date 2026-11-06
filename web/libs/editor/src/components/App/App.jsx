@@ -149,7 +149,9 @@ class App extends Component {
   _renderUI(root, as, fallback = null) {
     const skeleton3d = getEnv(this.props.store).skeleton3d;
 
-    if (!skeleton3d?.enabled && as.viewingAll && getRoot(as).hasInterface("annotations:view-all")) {
+    // Compare All must work independently of whether the optional
+    // popup-only 3D viewer is enabled.
+    if (as.viewingAll && getRoot(as).hasInterface("annotations:view-all")) {
       return this.renderAllAnnotations();
     }
 
