@@ -56,6 +56,7 @@ export function Skeleton3D({ store, config, docked = false }) {
   const [selectedJoint, setSelectedJoint] = useState(null);
   const [sourceId, setSourceId] = useState("auto");
   const [availableSources, setAvailableSources] = useState([]);
+  const currentTaskRef = useRef(null);
   useEffect(() => {
     try { window.localStorage.setItem("ls.skeleton3d.camera", JSON.stringify(sceneView)); }
     catch { /* Local storage can be disabled in private mode. */ }
@@ -142,15 +143,14 @@ export function Skeleton3D({ store, config, docked = false }) {
           : next);
       },
     });
-    let currentTask = null;
     const dispose = reaction(
       () => JSON.stringify(readSkeletonSnapshot(store, sourceId)),
       (snapshot) => {
         const current = JSON.parse(snapshot);
         setAvailableSources((previous) =>
           JSON.stringify(previous) === JSON.stringify(current.sources) ? previous : current.sources);
-        if (current.task !== currentTask) {
-          currentTask = current.task;
+        if (current.task !== currentTaskRef.current) {
+          currentTaskRef.current = current.task;
           history.current = [];
           setSelectedJoint(null);
           setSourceId("auto");
