@@ -123,6 +123,9 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
   // Snapshot the full calibration: changing it invalidates an in-flight response.
   const configKey = JSON.stringify(config);
   useEffect(() => {
+    // An unopened popup must not reconstruct on every 2D drag:
+    // start the live MobX subscription only while the 3D window is visible.
+    if (popupOnly && !popout) return undefined;
     const settings = JSON.parse(configKey);
     const runner = createReconstructionRunner({
       request: requestReconstruction,
@@ -162,7 +165,7 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
       { fireImmediately: true },
     );
     return () => { dispose(); runner.dispose(); };
-  }, [store, configKey, sourceId]);
+  }, [store, configKey, sourceId, popupOnly, Boolean(popout)]);
   useEffect(() => {
     try { window.localStorage.setItem(PANEL_KEY, JSON.stringify(panel)); } catch (error) { /* private mode */ }
   }, [panel]);
