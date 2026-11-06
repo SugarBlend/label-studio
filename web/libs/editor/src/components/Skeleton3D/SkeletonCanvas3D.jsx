@@ -207,7 +207,11 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
 
   joints.slice().sort((a, b) => projected.get(b.joint).depth - projected.get(a.joint).depth).forEach((joint) => {
     const p = projected.get(joint.joint);
-    const colour = options.colour === "neutral" ? BONE : colorOf(joint.joint);
+    // Toe landmarks are intentionally distinct from the body-side palette:
+    // big toes are red, small toes black (left AND right).
+    const colour = joint.joint.endsWith("_big_toe") ? "#e53935"
+      : joint.joint.endsWith("_small_toe") ? "#171717"
+        : options.colour === "neutral" ? BONE : colorOf(joint.joint);
     const radiusPx = Math.max(2.1, 4.1 * options.size);
     const halo = ctx.createRadialGradient(p.x - radiusPx * 0.38, p.y - radiusPx * 0.45, 0.6, p.x, p.y, radiusPx * 1.1);
     halo.addColorStop(0, "#ffffff");
