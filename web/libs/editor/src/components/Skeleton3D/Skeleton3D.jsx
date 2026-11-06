@@ -23,7 +23,7 @@ const readPanelState = () => {
 };
 
 /** Floating read-only window: the 3D view stays visible next to the mosaic while labelling. */
-export function Skeleton3D({ store, config, docked = false, popupOnly = false }) {
+export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, docked = false, popupOnly = false }, ref) {
   const [state, setState] = useState({ status: "pending", data: null });
   // Temporary in-memory reconstruction history for the Trail / Path toggles.
   // No points or trajectories are saved into the Label Studio annotations.
@@ -95,6 +95,11 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
     setPopout({ win, root });
     win.focus();
   };
+  // Expose the same popup action to the Submit/Update toolbar without moving
+  // this component into the task-dependent BottomBar subtree. The popup and
+  // live frame cache must survive BottomBar remounts during navigation.
+  React.useImperativeHandle(ref, () => ({ show: openPopout }));
+
   const attachPopout = () => {
     const win = popupWindow.current;
     popupWindow.current = null;
@@ -358,20 +363,9 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
     </section>
   );
   if (popupOnly) {
-    return (
-      <>
-        <button
-          type="button"
-          className={cn("main-view").elem("show-3d").toClassName()}
-          onClick={openPopout}
-          aria-label="Show 3D skeleton in a separate window"
-          title={popout && !popout.win.closed ? "Focus the open 3D window" : "Open live 3D skeleton on a second screen"}
-        >
-          Show 3D ↗
-        </button>
-        {popout && !popout.win.closed && createPortal(scene, popout.root)}
-      </>
-    );
+    // Only the detached scene is rendered here; its launcher is in BottomBar
+    // alongside Submit/Update and calls the imperative show() method.
+    return popout && !popout.win.closed ? createPortal(scene, popout.root) : null;
   }
   return (
     <>
@@ -379,4 +373,4 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
       {popout ? createPortal(scene, popout.root) : scene}
     </>
   );
-}
+});
