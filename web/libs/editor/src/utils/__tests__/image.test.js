@@ -223,7 +223,7 @@ describe("KeyPointRegion edge dragging", () => {
     expect(createDragBoundFunc(item)(position)).toEqual(expected);
   });
 
-  it("preserves rectangle restriction for multi-region selection drags", () => {
+  it("lets an individually dragged keypoint reach the edge even when it is selected as part of a group", () => {
     const item = {
       type: "keypointregion",
       parent: {
@@ -234,10 +234,21 @@ describe("KeyPointRegion edge dragging", () => {
       inSelection: true,
       bboxCoords: { left: 45, top: 45, right: 55, bottom: 55 },
     };
-    // The selected group is still constrained by its overall bbox.
-    const result = createDragBoundFunc(item)({ x: 200, y: 200 });
-    expect(result.x).toBeLessThan(200);
-    expect(result.y).toBeLessThan(200);
+    // Dragging this keypoint Circle must not use the group's bounding box.
+    // Group drags are handled by TransformerBack rather than this function.
+    expect(createDragBoundFunc(item)({ x: 200, y: 200 })).toEqual({ x: 200, y: 200 });
+    expect(createDragBoundFunc(item)({ x: -20, y: -20 })).toEqual({ x: 0, y: 0 });
+  });
+
+  it("preserves rectangle bounds for non-keypoint shapes", () => {
+    const item = {
+      type: "rectangleregion",
+      parent: image,
+      selected: true,
+      inSelection: false,
+      bboxCoords: { left: 40, top: 40, right: 60, bottom: 60 },
+    };
+    expect(createDragBoundFunc(item)({ x: 200, y: 200 })).toEqual({ x: 160, y: 160 });
   });
 });
 
