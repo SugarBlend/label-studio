@@ -341,20 +341,7 @@ export class LSFWrapper {
       const instantLoad = !this.labelStream && isDefined(taskID) && isInstantSwitchEnabled() && isTaskDataReady(taskID);
       const loadWrapper = instantLoad
         ? (callback) => callback.call(this)
-        : async (callback) => {
-          // Keep the currently annotated 2D frame visible but non-interactive
-          // while the next task JSON is fetched fresh. Unlike a loader this
-          // does not unmount the canvas or leave a white image area.
-          if (!this.labelStream && isInstantSwitchEnabled() && this.lsf?.task) {
-            this.setFrozen(true);
-            try {
-              return await callback.call(this);
-            } finally {
-              this.setFrozen(false);
-            }
-          }
-          return this.withinLoadingState(callback);
-        };
+        : (callback) => this.withinLoadingState(callback);
 
       const newTask = await loadWrapper(async () => {
         let nextTask;
@@ -428,14 +415,10 @@ export class LSFWrapper {
     const instantSwitch = isInstantSwitchEnabled() && areTaskImagesReady(task);
 
     if (!instantSwitch) {
-      if (isInstantSwitchEnabled() && this.lsf?.task) {
-        // Keep the old frame visible until the new task is ready. Blocking
-        // input avoids edits to the wrong task during this transition.
-        this.setFrozen(true);
-      } else {
-        this.setLoading(true, hasChangedTasks);
-        await waitForPaint();
-      }
+      this.setLoading(true, hasChangedTasks);
+
+      // Let the browser paint the loading indicator before heavy store operations
+      await waitForPaint();
     }
 
     if (!this.lsf) return;
@@ -670,6 +653,7 @@ export class LSFWrapper {
     // if we have annotations created automatically, we don't need to create another one
     // automatically === created here and haven't saved yet, so they don't have pk
     // @todo because of some weird reason pk may be string uid, so check flags then
+    const hasAutoAnnotations = !!first && (!first.pk || (first.userGenerate && first.sentUserGenerate === false));
     const showPredictions = this.project.show_collab_predictions === true;
 
     if (this.labelStream) {
@@ -692,13 +676,10 @@ export class LSFWrapper {
       } else if (this.annotations.length === 0 && this.predictions.length > 0 && !this.isInteractivePreannotations) {
         const predictionByModelVersion = this.predictions.find((p) => p.createdBy === this.project.model_version);
         annotation = cs.addAnnotationFromPrediction(predictionByModelVersion ?? this.predictions[0]);
-      } else if (this.annotations.length > 0) {
-        // In quick view, a missing annotation ID is not an instruction
-        // to create a blank annotation. Show existing work by default,
-        // or fall back to the first when the URL references an old version.
-        annotation = id && id !== "auto"
-          ? this.annotations.find((c) => c.pk === id || c.id === id) ?? first
-          : first;
+      } else if (this.annotations.length > 0 && id && id !== "auto") {
+        annotation = this.annotations.find((c) => c.pk === id || c.id === id);
+      } else if (this.annotations.length > 0 && (id === "auto" || hasAutoAnnotations)) {
+        annotation = first;
       } else {
         annotation = cs.createAnnotation();
       }
