@@ -157,11 +157,11 @@ class App extends Component {
     // secondary window is a live React portal, never a second editor.
     return (
       <div
-        className={`${cn("main-view").toClassName()}${skeleton3d?.enabled ? " main-view--skeleton3d" : ""}`}
+        className={cn("main-view").mod({ skeleton3d: Boolean(skeleton3d?.enabled) }).toClassName()}
         onScrollCapture={this._notifyScroll}
       >
         {skeleton3d?.enabled && (
-          <div className="main-view__skeleton-launcher">
+          <div className={cn("main-view").elem("skeleton-launcher").toClassName()}>
             <Skeleton3D store={this.props.store} config={skeleton3d} popupOnly />
           </div>
         )}
