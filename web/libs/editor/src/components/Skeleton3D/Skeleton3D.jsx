@@ -54,6 +54,8 @@ export function Skeleton3D({ store, config, docked = false }) {
     shadow: true, trail: false, path: false, soles: true,
   });
   const [selectedJoint, setSelectedJoint] = useState(null);
+  const [sourceId, setSourceId] = useState("auto");
+  const [availableSources, setAvailableSources] = useState([]);
   useEffect(() => {
     try { window.localStorage.setItem("ls.skeleton3d.camera", JSON.stringify(sceneView)); }
     catch { /* Local storage can be disabled in private mode. */ }
@@ -142,13 +144,16 @@ export function Skeleton3D({ store, config, docked = false }) {
     });
     let currentTask = null;
     const dispose = reaction(
-      () => JSON.stringify(readSkeletonSnapshot(store)),
+      () => JSON.stringify(readSkeletonSnapshot(store, sourceId)),
       (snapshot) => {
         const current = JSON.parse(snapshot);
+        setAvailableSources((previous) =>
+          JSON.stringify(previous) === JSON.stringify(current.sources) ? previous : current.sources);
         if (current.task !== currentTask) {
           currentTask = current.task;
           history.current = [];
           setSelectedJoint(null);
+          setSourceId("auto");
           setState({ status: "pending", data: null, error: null, notes: [] });
         }
         runner.update({ ...adaptSkeleton(current, settings), config: settings });
@@ -156,7 +161,7 @@ export function Skeleton3D({ store, config, docked = false }) {
       { fireImmediately: true },
     );
     return () => { dispose(); runner.dispose(); };
-  }, [store, configKey]);
+  }, [store, configKey, sourceId]);
   useEffect(() => {
     try { window.localStorage.setItem(PANEL_KEY, JSON.stringify(panel)); } catch (error) { /* private mode */ }
   }, [panel]);
@@ -260,6 +265,21 @@ export function Skeleton3D({ store, config, docked = false }) {
           padding: "8px 10px 10px", overflow: "auto", flex: "1 1 auto",
           minHeight: 0, height: "100%", overscrollBehavior: "contain",
         }}>
+          {availableSources.length > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, paddingBottom: 7 }}>
+              <strong>3D source</strong>
+              <select value={sourceId} onChange={(event) => setSourceId(event.target.value)}
+                aria-label="3D reconstruction annotation source"
+                style={{ minWidth: 180, maxWidth: "100%", padding: "4px 6px" }}>
+                <option value="auto">Auto: selected annotation, or first populated</option>
+                {availableSources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {source.type}: {source.label} ({source.count} points)
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div role="status" aria-live="polite" style={{ fontSize: 12, color: "#b91c1c" }}>{state.error}</div>
           {rejectedByQuality.length > 0 && (
             <div role="alert" style={{
