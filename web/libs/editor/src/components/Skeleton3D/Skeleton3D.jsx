@@ -136,8 +136,10 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
       // Faster frame navigation, while coalescing frequent 2D drags and
       // capping how often this browser starts a server reconstruction.
       fastDelay: 35,
-      delay: 220,
-      minInterval: 150,
+      delay: 280,
+      // At most ~4 requests/sec per active editor even during rapid input.
+      // Each user's own session limits its requests; no global shared cache.
+      minInterval: 250,
       onState: (next) => {
         if (next.status === "ready" && Array.isArray(next.data?.joints)) {
           const accepted = next.data.joints.filter((j) =>
