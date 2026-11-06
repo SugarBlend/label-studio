@@ -30,7 +30,6 @@ import { isStarterCloudPlan } from "@humansignal/core";
 import { cn } from "../../utils/bem";
 import { FF_BULK_ANNOTATION, FF_LSDV_4620_3_ML, FF_SIMPLE_INIT, isFF } from "../../utils/feature-flags";
 import { reactCleaner } from "../../utils/reactCleaner";
-import { guidGenerator } from "../../utils/unique";
 import { isDefined, sortAnnotations } from "../../utils/utilities";
 import { queryClient } from "@humansignal/core/lib/utils/query-client";
 import { ToastProvider, ToastViewport } from "@humansignal/ui/lib/toast/toast";
@@ -210,7 +209,7 @@ class App extends Component {
 
     return (
       <RelationsOverlay
-        key={guidGenerator()}
+        key={selectedStore.id}
         store={store}
         ref={this.relationsRef}
         tags={selectedStore.names}
