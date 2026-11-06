@@ -5,6 +5,7 @@ import { adaptSkeleton, createFrameCache, createReconstructionRunner, readSkelet
 import { requestReconstruction } from "./request";
 import { SkeletonCanvas3D } from "./SkeletonCanvas3D";
 import { mergeFrameState } from "./frameState";
+import { getReprojectionWarnings } from "./reprojectionQuality";
 import { cn } from "../../utils/bem";
 
 const formatAngle = (value) => (Number.isFinite(value) ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)}°` : "n/a");
@@ -228,22 +229,10 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
   }, []);
 
   const data = state.data;
-  const rejectedByQuality = (data?.joints ?? []).filter((joint) =>
-    Number.isFinite(joint.rms_reprojection_error_px) && joint.rms_reprojection_error_px > 10);
-  const goodJoints = (data?.joints ?? []).filter((joint) =>
-    Number.isFinite(joint.rms_reprojection_error_px) && joint.rms_reprojection_error_px <= 10);
-  // Suppress a globally wrong pose rather than presenting impossible bone lengths.
-  const unreliable = !!data?.joints?.length && rejectedByQuality.length >= Math.ceil(data.joints.length / 2);
-  const names = new Set(goodJoints.map((joint) => joint.joint));
-  const validFoot = (side) => ["heel", "big_toe", "small_toe"].every((part) => names.has(`${side}_${part}`));
-  const safeData = data && !unreliable ? {
-    ...data,
-    joints: goodJoints,
-    foot_tilt: {
-      left: validFoot("l") ? data.foot_tilt?.left : null,
-      right: validFoot("r") ? data.foot_tilt?.right : null,
-    },
-  } : null;
+  const rejectedByQuality = getReprojectionWarnings(data);
+  // Every successfully triangulated joint remains visible, regardless of RMS.
+  // Backend-rejected (nontriangulable) joints have no valid 3D position.
+  const safeData = data;
   const warnings = [
     ...(state.notes ?? []),
     ...(data?.warnings ?? []).map((w) => (typeof w === "string" ? w : JSON.stringify(w))),
@@ -354,11 +343,10 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
               padding: "9px 11px", margin: "8px 0", border: "1px solid #f4b38c",
               background: "#fff7ed", borderRadius: 5, color: "#9a3412", fontSize: 12,
             }}>
-              <strong>3D reconstruction quality problem:</strong> {rejectedByQuality.length} of {data.joints.length} joints
+              <strong>3D reconstruction quality warning:</strong> {rejectedByQuality.length} of {data.joints.length} joints
               have a reprojection RMS above 10 px.
-              {unreliable
-                ? " The 3D skeleton is hidden because the camera geometry is inconsistent."
-                : " Unreliable joints and their connecting bones are hidden."}
+              All successfully triangulated joints remain visible for correction.
+              High-error joints have red warning rings and their bones are dashed.
               {" "}Check Settings → 3D skeleton: enter the camera resolution corresponding to the
               intrinsics, not an unrelated preview size. For the supplied 3840×2160 Foots mosaic use 1920×1080
               per camera. Check camera order and raw/undistorted image settings.
