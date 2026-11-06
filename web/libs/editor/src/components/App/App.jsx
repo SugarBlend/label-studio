@@ -73,6 +73,9 @@ const hasTagInSidebar = (annotation) => {
  */
 class App extends Component {
   relationsRef = React.createRef();
+  skeleton3dRef = React.createRef();
+
+  onShow3D = () => this.skeleton3dRef.current?.show();
 
   componentDidMount() {
     // Hack to activate app hotkeys
@@ -149,22 +152,19 @@ class App extends Component {
   _renderUI(root, as, fallback = null) {
     const skeleton3d = getEnv(this.props.store).skeleton3d;
 
-    if (!skeleton3d?.enabled && as.viewingAll && getRoot(as).hasInterface("annotations:view-all")) {
+    // Compare All must work independently of whether the optional
+    // popup-only 3D viewer is enabled.
+    if (as.viewingAll && getRoot(as).hasInterface("annotations:view-all")) {
       return this.renderAllAnnotations();
     }
 
-    // Keep the launcher mounted across annotation and frame changes: its
-    // secondary window is a live React portal, never a second editor.
+    // The Show 3D launcher is owned by the stable App root, not by the
+    // task-dependent main view or SideTabsPanels.
     return (
       <div
         className={cn("main-view").mod({ skeleton3d: Boolean(skeleton3d?.enabled) }).toClassName()}
         onScrollCapture={this._notifyScroll}
       >
-        {skeleton3d?.enabled && (
-          <div className={cn("main-view").elem("skeleton-launcher").toClassName()}>
-            <Skeleton3D store={this.props.store} config={skeleton3d} popupOnly />
-          </div>
-        )}
         <div className={cn("main-view").elem("annotation").toClassName()}>
           {fallback ?? (root && as.selected ? (
             <>
@@ -279,6 +279,11 @@ class App extends Component {
               </InstructionsModal>
 
               {isDefined(store) && !store.isLoading && root && store.hasInterface("topbar") && <TopBar store={store} />}
+              {/* The 3D viewer stays mounted here across frame changes, while
+                  its Show 3D button is rendered next to Submit/Update in BottomBar. */}
+              {skeletonEnabled && (
+                <Skeleton3D ref={this.skeleton3dRef} store={store} config={getEnv(store).skeleton3d} popupOnly />
+              )}
               <div
                 className={cn("wrapper")
                   .mod({
@@ -291,7 +296,7 @@ class App extends Component {
                 {isBulkMode || !store.hasInterface("side-column") || !as.selected ? (
                   <>
                     {mainContent}
-                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} />}
                   </>
                 ) : (
                   <SideTabsPanels
@@ -303,7 +308,7 @@ class App extends Component {
                     focusTab={store.commentStore.tooltipMessage ? "comments" : null}
                   >
                     {mainContent}
-                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} />}
                   </SideTabsPanels>
                 )}
               </div>

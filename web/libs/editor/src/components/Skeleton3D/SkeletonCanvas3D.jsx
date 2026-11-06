@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { BONE, LEFT, RIGHT, colorOf, sideOf, standardEdges } from "./topology";
+import { hasHighReprojectionError } from "./reprojectionQuality";
 
 const add = (a, b) => a.map((n, i) => n + b[i]);
 const sub = (a, b) => a.map((n, i) => n - b[i]);
@@ -55,6 +56,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
 
   const joints = (data.joints || []).filter((j) => finite(j.position));
   if (!joints.length) return;
+  const highErrorNames = new Set(joints.filter(hasHighReprojectionError).map((joint) => joint.joint));
   const up = unit(finite(data.floor_up) ? data.floor_up : [0, 0, 1]);
   const axisX = unit(cross(Math.abs(up[2]) > 0.9 ? [0, 1, 0] : [0, 0, 1], up));
   const axisY = unit(cross(up, axisX));
@@ -198,9 +200,16 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
     const palette = sideOf(a) && sideOf(a) === sideOf(b) ? colorOf(a) : BONE;
     const color = options.colour === "neutral" ? BONE : palette;
     const thick = Math.max(2.1, 4.7 * options.size * Math.min(1.5, ((ap.magnification + bp.magnification) / 2) * radius / h));
+    const hasWarning = highErrorNames.has(a) || highErrorNames.has(b);
+    if (hasWarning) ctx.setLineDash([7, 5]);
     line(ap, bp, tint(color, 0.64), thick + 1.8);
     line(ap, bp, color, thick);
-    line({ x: ap.x - thick * 0.15, y: ap.y - thick * 0.16 }, { x: bp.x - thick * 0.15, y: bp.y - thick * 0.16 }, tint(color, 1.18), Math.max(0.5, thick * 0.22), 0.75);
+    if (!hasWarning) {
+      line({ x: ap.x - thick * 0.15, y: ap.y - thick * 0.16 },
+        { x: bp.x - thick * 0.15, y: bp.y - thick * 0.16 },
+        tint(color, 1.18), Math.max(0.5, thick * 0.22), 0.75);
+    }
+    if (hasWarning) ctx.setLineDash([]);
   };
   edges.sort(([a, b], [c, d]) => ((projected.get(b).depth + projected.get(a).depth) -
     (projected.get(c).depth + projected.get(d).depth)) * -1).forEach(drawBone);
@@ -220,6 +229,15 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
     ctx.beginPath();ctx.arc(p.x, p.y, radiusPx, 0, 2 * Math.PI);
     ctx.fillStyle = halo;ctx.fill();
     ctx.strokeStyle = "#eaf0f7";ctx.lineWidth = 0.8;ctx.stroke();
+    if (highErrorNames.has(joint.joint)) {
+      // Warning ring leaves the original joint fill intact, including
+      // red big toes and black small toes, while exposing bad 2D matches.
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radiusPx + 3.5, 0, Math.PI * 2);
+      ctx.strokeStyle = "#dc2626";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
     if (joint.joint === selectedJoint) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, radiusPx + 6, 0, Math.PI * 2);
@@ -395,9 +413,12 @@ export function SkeletonCanvas3D({
         }}
         style={{
           width: "100%",
-          height: detached ? "calc(100vh - 140px)" : docked ? "100%" : 400,
-          minHeight: detached ? 260 : docked ? 180 : 260,
-          flex: docked ? "1 1 auto" : undefined,
+          // Fill the fixed viewport assigned by Skeleton3D. Do not size from
+          // 100vh: the status panel below reserves space independently.
+          height: docked ? "100%" : 400,
+          minHeight: docked ? 0 : 260,
+          minWidth: 0,
+          flex: docked ? "1 1 0" : undefined,
           display: "block", touchAction: "none", cursor: "grab",
         }}
       />

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 const load = async (name) => import(`data:text/javascript;base64,${Buffer.from(await readFile(new URL(name, import.meta.url))).toString("base64")}`);
-const { adaptSkeleton, normalizeJoint, readSkeletonSnapshot, listSkeletonSources, createReconstructionRunner } = await load("adapter.js");
+const { adaptSkeleton, normalizeJoint, readSkeletonSnapshot, listSkeletonSources, createFrameCache, reconstructionKey, createReconstructionRunner } = await load("adapter.js");
 const { requestReconstruction } = await load("request.js");
 const config = { cameras: [0, 1, 2, 3].map((slot) => ({ slot, image_width: 640, image_height: 480, calibration: {} })) };
 const point = (id, x, y, group = "") => ({ id, x, y, group, image: "img", index: 0, width: 1280, height: 960, labels: ["left big toe"] });
@@ -106,6 +106,100 @@ test("latest-only runner debounces, aborts and ignores stale task/annotation/cal
   assert.equal(states.at(-1).data, null);
   t.mock.timers.tick(200);
   assert.equal(calls.length, 2);
+  runner.dispose();
+});
+test("frame cache is bounded, private and exact to task/annotation/calibration/observations", () => {
+  const cache = createFrameCache(2);
+  const input = (task, x, calibration = "A") => ({
+    task, annotation: "ann", config: { calibration },
+    observations: [{ slot: 0, joint: "nose", x, y: 12 }], edges: [],
+  });
+  const first = reconstructionKey(input(1, 10));
+  const second = reconstructionKey(input(2, 10));
+  const third = reconstructionKey(input(3, 10));
+  assert.notEqual(first, second);
+  assert.notEqual(first, reconstructionKey(input(1, 11)));
+  assert.notEqual(first, reconstructionKey(input(1, 10, "B")));
+  const a = { joints: [{ joint: "nose" }] };
+  cache.set(first, a);
+  cache.set(second, { joints: [{ joint: "nose" }] });
+  assert.equal(cache.size, 2);
+  assert.equal(cache.get(first), a); // refresh LRU
+  cache.set(third, { joints: [{ joint: "nose" }] });
+  assert.equal(cache.get(second), undefined);
+  assert.equal(cache.get(first), a);
+  cache.set("bad", { joints: [] });
+  assert.equal(cache.get("bad"), undefined);
+  cache.clear();
+  assert.equal(cache.size, 0);
+});
+
+test("fast frame switching uses a private cache and ignores stale responses", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const cache = createFrameCache(8);
+  const calls = [], states = [];
+  const task = (number) => ({
+    task: number, annotation: "a", config: { endpoint: "/reconstruct" },
+    observations: [{ slot: 0, joint: "nose", x: number, y: 0 }], edges: [],
+  });
+  let clock = 1000;
+  const runner = createReconstructionRunner({
+    cache, delay: 220, fastDelay: 35, minInterval: 150, now: () => clock,
+    onState: (state) => states.push(state),
+    request: (input, sequence, signal) => new Promise((resolve) => calls.push({ input, sequence, signal, resolve })),
+  });
+  runner.update(task(1));
+  t.mock.timers.tick(34);
+  assert.equal(calls.length, 0);
+  t.mock.timers.tick(1);
+  assert.equal(calls.length, 1);
+  calls[0].resolve({ joints: [{ joint: "nose" }] });
+  await Promise.resolve();
+  assert.equal(states.at(-1).status, "ready");
+  runner.update(task(2));
+  clock += 160;
+  t.mock.timers.tick(35);
+  assert.equal(calls.length, 2);
+  runner.update(task(3));
+  assert.equal(calls[1].signal.aborted, true);
+  clock += 160;
+  t.mock.timers.tick(35);
+  assert.equal(calls.length, 3);
+  calls[1].resolve({ joints: [{ joint: "stale" }] });
+  calls[2].resolve({ joints: [{ joint: "latest" }] });
+  await Promise.resolve();
+  assert.deepEqual(states.at(-1).data.joints, [{ joint: "latest" }]);
+  assert.equal(cache.size, 2);
+  runner.update(task(1));
+  assert.equal(states.at(-1).cached, true);
+  assert.equal(calls.length, 3);
+  runner.update(task(1)); // unchanged
+  assert.equal(calls.length, 3);
+  runner.dispose();
+});
+
+test("rapid edits are coalesced and paced before server requests", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let clock = 5000;
+  const calls = [];
+  const runner = createReconstructionRunner({
+    request: (input) => { calls.push(input); return Promise.resolve({ joints: [] }); },
+    onState: () => {}, delay: 220, fastDelay: 35, minInterval: 150, now: () => clock,
+  });
+  const input = (x) => ({ task: 7, annotation: "x", config: {}, observations: [{ x }], edges: [] });
+  runner.update(input(1));
+  t.mock.timers.tick(35);
+  assert.equal(calls.length, 1);
+  clock += 20;
+  runner.update(input(2));
+  runner.update(input(3));
+  runner.update(input(4));
+  t.mock.timers.tick(219);
+  assert.equal(calls.length, 1);
+  clock += 220;
+  t.mock.timers.tick(1);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].observations[0].x, 4);
   runner.dispose();
 });
 test("request enforces same origin, CSRF, observation-only body and response sequence", async () => {

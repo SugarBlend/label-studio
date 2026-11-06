@@ -379,6 +379,12 @@ export class DataManager {
   setMode(mode) {
     const modeChanged = mode !== this.mode;
 
+    // Close the read-only detached 3D window only when exiting labeling.
+    // Keep it open when switching tasks, frames, annotations, or predictions.
+    if (modeChanged && mode === "explorer") {
+      window.dispatchEvent(new Event("labelstudio:leave-labeling"));
+    }
+
     this.mode = mode;
     this.store.setMode(mode);
 
@@ -451,6 +457,11 @@ export class DataManager {
   }
 
   destroyLSF() {
+    if (this.lsf) {
+      // Also cover leaving the Data Manager route, closing the task editor
+      // without a mode change, and destroying the parent SDK.
+      window.dispatchEvent(new Event("labelstudio:leave-labeling"));
+    }
     this.invoke("beforeLsfDestroy", this, this.lsf?.lsfInstance);
     this.lsf?.destroy();
     this.lsf = undefined;

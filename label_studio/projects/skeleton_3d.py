@@ -130,18 +130,44 @@ def distort(point, d):
                      y*radial + p1*(r2 + 2*y*y) + 2*p2*x*y])
 
 
-def undistort(pixel, K, d):
-    target = (np.linalg.inv(K) @ np.array([*pixel, 1]))[:2]
-    point = target.copy()
+def undistort(pixel, K, d, inverse_K=None):
+    """Invert OpenCV rational distortion with an analytic 2x2 Jacobian.
+
+    The previous finite-difference Newton method evaluated the distortion
+    function five times per iteration and inverted the camera intrinsics for
+    every joint. The analytic derivative produces the same coordinates with
+    less CPU work, important with multiple simultaneous annotators.
+    """
+    if inverse_K is None:
+        inverse_K = np.linalg.inv(K)
+    target = (inverse_K @ np.array([*pixel, 1]))[:2]
+    x, y = target
+    k1, k2, p1, p2, k3, k4, k5, k6 = d
     for _ in range(30):
-        residual = distort(point, d) - target
-        if np.linalg.norm(residual) < 1e-10:
-            return point
-        eps = 1e-6
-        jacobian = np.column_stack([(distort(point + delta, d) - distort(point - delta, d))/(2*eps)
-                                    for delta in (np.array([eps, 0]), np.array([0, eps]))])
-        point -= np.linalg.solve(jacobian, residual)
-        if not np.isfinite(point).all() or np.linalg.norm(point) > 1e6:
+        r2 = x*x + y*y
+        numerator = 1 + r2*(k1 + r2*(k2 + r2*k3))
+        denominator = 1 + r2*(k4 + r2*(k5 + r2*k6))
+        if not np.isfinite(denominator) or abs(denominator) < 1e-14:
+            raise ValueError('Singular distortion')
+        radial = numerator / denominator
+        error_x = x*radial + 2*p1*x*y + p2*(r2 + 2*x*x) - target[0]
+        error_y = y*radial + p1*(r2 + 2*y*y) + 2*p2*x*y - target[1]
+        if np.hypot(error_x, error_y) < 1e-10:
+            return np.array([x, y])
+
+        numerator_derivative = k1 + r2*(2*k2 + 3*r2*k3)
+        denominator_derivative = k4 + r2*(2*k5 + 3*r2*k6)
+        dradial = (numerator_derivative*denominator -
+                   numerator*denominator_derivative) / (denominator*denominator)
+        a = radial + 2*x*x*dradial + 2*p1*y + 6*p2*x
+        b = 2*x*y*dradial + 2*p1*x + 2*p2*y
+        c = radial + 2*y*y*dradial + 6*p1*y + 2*p2*x
+        determinant = a*c - b*b
+        if not np.isfinite(determinant) or abs(determinant) < 1e-14:
+            break
+        x -= (c*error_x - b*error_y) / determinant
+        y -= (a*error_y - b*error_x) / determinant
+        if not (np.isfinite(x) and np.isfinite(y)) or np.hypot(x, y) > 1e6:
             break
     raise ValueError('Distortion inversion did not converge')
 
@@ -154,6 +180,9 @@ def reconstruct(config, observations):
         raise ValueError('observations must be a list of at most 1000 items')
     cameras = {c['slot']: c for c in config['cameras']}
     parameters = {slot: camera_parameters(c) for slot, c in cameras.items()}
+    # Camera intrinsics remain constant within a reconstruction: compute each
+    # inverse just once, with no cross-user/global cache.
+    inverses = {slot: np.linalg.inv(params[0]) for slot, params in parameters.items()}
     groups = {}
     for observation in observations:
         if not isinstance(observation, dict) or set(observation) != {'slot', 'joint', 'x', 'y'}:
@@ -182,7 +211,7 @@ def reconstruct(config, observations):
             rows, rays = [], []
             for slot, pixel in group.items():
                 K, R, t, d = parameters[slot]
-                x, y = undistort(pixel, K, d)
+                x, y = undistort(pixel, K, d, inverses[slot])
                 P = np.column_stack([R, t])
                 rows.extend([x*P[2] - P[0], y*P[2] - P[1]])
                 ray = R.T @ np.array([x, y, 1])

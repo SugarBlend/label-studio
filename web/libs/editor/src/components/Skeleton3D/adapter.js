@@ -186,27 +186,105 @@ export function adaptSkeleton(snapshot, config) {
   return { observations, edges, notes, error: null };
 }
 
-/** Latest-only scheduling: invalidation aborts immediately, before the debounce. */
-export function createReconstructionRunner({ request, onState, delay = 200 }) {
+/**
+ * Session-only, bounded LRU. Never shared between editors or users and never
+ * persisted into browser storage, Django cache, or other server-side sessions.
+ * Entries are exact matches on task, annotation, calibration AND observations.
+ */
+export function createFrameCache(capacity = 8) {
+  const entries = new Map();
+  return {
+    get(key) {
+      if (!entries.has(key)) return undefined;
+      const value = entries.get(key);
+      entries.delete(key);
+      entries.set(key, value);
+      return value;
+    },
+    set(key, value) {
+      // Don't cache failed/empty triangulations.
+      if (!Array.isArray(value?.joints) || value.joints.length === 0) return;
+      entries.delete(key);
+      entries.set(key, value);
+      while (entries.size > capacity) entries.delete(entries.keys().next().value);
+    },
+    clear() { entries.clear(); },
+    get size() { return entries.size; },
+  };
+}
+
+export function reconstructionKey(input) {
+  return JSON.stringify([
+    input.task, input.annotation, input.config,
+    input.observations, input.edges,
+  ]);
+}
+
+/**
+ * Latest-only, bounded server scheduling.
+ *
+ * - Frame changes have a very short debounce, but server requests are paced.
+ * - Drag edits are coalesced so many users don't flood Django with requests.
+ * - Already reconstructed *identical* frames are served from the editor's
+ *   private in-memory LRU without an HTTP request.
+ * - Aborted/stale replies must never overwrite a newer frame.
+ */
+export function createReconstructionRunner({
+  request, onState, delay = 200, fastDelay = delay,
+  minInterval = 0, cache, now = () => Date.now(),
+}) {
   let generation = 0;
   let timer;
   let controller;
+  let signature;
+  let lastRequestAt = -Infinity;
+  let lastRequestedTask;
+  let lastRequestedAnnotation;
   return {
     update(input) {
+      const key = reconstructionKey(input);
+      // An identical state requires no new work. Keep the previous
+      // in-flight request valid instead of aborting it.
+      if (key === signature && !input.error) return;
       const current = ++generation;
+      signature = key;
       clearTimeout(timer);
       controller?.abort();
-      onState({ status: input.error ? "invalid" : "pending", error: input.error, data: null, notes: input.notes ?? [] });
-      if (input.error) return;
+      controller = undefined;
+
+      if (input.error) {
+        onState({ status: "invalid", error: input.error, data: null, notes: input.notes ?? [] });
+        return;
+      }
+
+      const hit = cache?.get(key);
+      if (hit) {
+        onState({ status: "ready", error: null, data: hit, notes: input.notes ?? [], cached: true });
+        return;
+      }
+
+      onState({ status: "pending", error: null, data: null, notes: input.notes ?? [] });
+      const newFrame = input.task !== lastRequestedTask || input.annotation !== lastRequestedAnnotation;
+      const debounce = newFrame ? fastDelay : delay;
+      const elapsed = now() - lastRequestAt;
+      const wait = Math.max(debounce, Math.max(0, minInterval - elapsed));
       timer = setTimeout(async () => {
         controller = new AbortController();
+        lastRequestAt = now();
+        lastRequestedTask = input.task;
+        lastRequestedAnnotation = input.annotation;
         try {
           const data = await request(input, current, controller.signal);
-          if (current === generation) onState({ status: "ready", data, error: null, notes: input.notes ?? [] });
+          if (current === generation) {
+            cache?.set(key, data);
+            onState({ status: "ready", data, error: null, notes: input.notes ?? [], cached: false });
+          }
         } catch (error) {
-          if (current === generation && error.name !== "AbortError") onState({ status: "error", data: null, error: error.message, notes: [] });
+          if (current === generation && error.name !== "AbortError") {
+            onState({ status: "error", data: null, error: error.message, notes: input.notes ?? [] });
+          }
         }
-      }, delay);
+      }, wait);
     },
     dispose() { ++generation; clearTimeout(timer); controller?.abort(); },
   };
