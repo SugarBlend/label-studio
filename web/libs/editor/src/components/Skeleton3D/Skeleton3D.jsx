@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { reaction } from "mobx";
-import { adaptSkeleton, createReconstructionRunner, readSkeletonSnapshot } from "./adapter";
+import { adaptSkeleton, createFrameCache, createReconstructionRunner, readSkeletonSnapshot } from "./adapter";
 import { requestReconstruction } from "./request";
 import { SkeletonCanvas3D } from "./SkeletonCanvas3D";
 import { cn } from "../../utils/bem";
@@ -27,6 +27,8 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
   // Temporary in-memory reconstruction history for the Trail / Path toggles.
   // No points or trajectories are saved into the Label Studio annotations.
   const history = useRef([]);
+  // Per-editor, per-browser-tab LRU. No backend/shared cache or task prefetch.
+  const frameCache = useRef(createFrameCache(8));
   const [panel, setPanel] = useState(readPanelState);
   const box = useRef(null);
   const moving = useRef(null);
@@ -130,6 +132,12 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
     const settings = JSON.parse(configKey);
     const runner = createReconstructionRunner({
       request: requestReconstruction,
+      cache: frameCache.current,
+      // Faster frame navigation, while coalescing frequent 2D drags and
+      // capping how often this browser starts a server reconstruction.
+      fastDelay: 35,
+      delay: 220,
+      minInterval: 150,
       onState: (next) => {
         if (next.status === "ready" && Array.isArray(next.data?.joints)) {
           const accepted = next.data.joints.filter((j) =>
@@ -141,11 +149,18 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
             if (JSON.stringify(frame) !== JSON.stringify(last)) history.current = [...history.current, frame].slice(-90);
           }
         }
-        // Keep the last good 3D pose on screen during the debounce/request:
-        // otherwise dragging one 2D point unmounts the 3D canvas on every tick.
-        setState((previous) => next.status === "pending" && previous.data
-          ? { ...next, data: previous.data }
-          : next);
+        // Preserve the last scene while the new frame is loading, but make
+        // the transition visible: the old pose is only a placeholder until the
+        // new result arrives. Never label it as the current reconstruction.
+        setState((previous) => {
+          if (next.status === "pending" && previous.data) {
+            return { ...next, data: previous.data, stale: true };
+          }
+          if (next.status === "error" && previous.data) {
+            return { ...next, data: previous.data, stale: true };
+          }
+          return { ...next, stale: false };
+        });
       },
     });
     const dispose = reaction(
@@ -159,9 +174,19 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
           history.current = [];
           setSelectedJoint(null);
           setSourceId("auto");
-          setState({ status: "pending", data: null, error: null, notes: [] });
+          // Keep the previously rendered geometry until this frame's
+          // reconstruction is ready. The pending state explicitly marks it stale.
+          setState((previous) => ({
+            status: "pending", data: previous.data, error: null,
+            notes: [], stale: Boolean(previous.data),
+          }));
         }
-        runner.update({ ...adaptSkeleton(current, settings), config: settings });
+        runner.update({
+          ...adaptSkeleton(current, settings),
+          config: settings,
+          task: current.task,
+          annotation: current.annotation,
+        });
       },
       { fireImmediately: true },
     );
@@ -209,7 +234,9 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
     ...(data?.warnings ?? []).map((w) => (typeof w === "string" ? w : JSON.stringify(w))),
     ...(data?.rejected ?? []).map((r) => `${r.joint}: ${r.reason}`),
   ];
-  const status = state.status === "pending" ? "reconstructing…" : state.status === "ready" ? "drag to orbit · wheel to zoom" : "";
+  const status = state.status === "pending"
+    ? (state.stale ? "Loading new frame · showing previous pose" : "reconstructing…")
+    : state.status === "ready" ? (state.cached ? "cached frame · drag to orbit" : "drag to orbit · wheel to zoom") : "";
   const angles = safeData ? `L ${formatAngle(safeData.foot_tilt?.left)} · R ${formatAngle(safeData.foot_tilt?.right)}` : "";
   const scene = (
     <section ref={box} aria-label="Live 3D skeleton"
@@ -285,7 +312,12 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
               </select>
             </label>
           )}
-          <div role="status" aria-live="polite" style={{ fontSize: 12, color: "#b91c1c" }}>{state.error}</div>
+          <div role="status" aria-live="polite" style={{
+            fontSize: 12, color: state.stale ? "#925d12" : "#b91c1c",
+          }}>
+            {state.stale && <span>Previous 3D pose is visible while the current frame updates. </span>}
+            {state.error}
+          </div>
           {rejectedByQuality.length > 0 && (
             <div role="alert" style={{
               padding: "9px 11px", margin: "8px 0", border: "1px solid #f4b38c",
