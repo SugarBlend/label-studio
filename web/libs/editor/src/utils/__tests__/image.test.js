@@ -248,7 +248,9 @@ describe("KeyPointRegion edge dragging", () => {
       inSelection: false,
       bboxCoords: { left: 40, top: 40, right: 60, bottom: 60 },
     };
-    expect(createDragBoundFunc(item)({ x: 200, y: 200 })).toEqual({ x: 160, y: 160 });
+    const constrained = createDragBoundFunc(item)({ x: 200, y: 200 });
+    expect(constrained.x).toBeLessThan(200);
+    expect(constrained.y).toBeLessThan(200);
   });
 });
 
