@@ -4,6 +4,7 @@ import { reaction } from "mobx";
 import { adaptSkeleton, createFrameCache, createReconstructionRunner, readSkeletonSnapshot } from "./adapter";
 import { requestReconstruction } from "./request";
 import { SkeletonCanvas3D } from "./SkeletonCanvas3D";
+import { mergeFrameState } from "./frameState";
 import { cn } from "../../utils/bem";
 
 const formatAngle = (value) => (Number.isFinite(value) ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)}°` : "n/a");
@@ -154,21 +155,7 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
         // Preserve the last scene while the new frame is loading, but make
         // the transition visible: the old pose is only a placeholder until the
         // new result arrives. Never label it as the current reconstruction.
-        setState((previous) => {
-          if (next.status === "pending" && previous.data) {
-            return { ...next, data: previous.data, stale: true };
-          }
-          if ((next.status === "error" || next.status === "invalid") && previous.data) {
-            return { ...next, data: previous.data, stale: true };
-          }
-          if (next.status === "ready" && !next.data?.joints?.length && previous.data) {
-            return {
-              ...next, data: previous.data, stale: true,
-              error: "No reconstructable joints in the current frame.",
-            };
-          }
-          return { ...next, stale: false };
-        });
+        setState((previous) => mergeFrameState(previous, next));
       },
     });
     const dispose = reaction(
