@@ -21,7 +21,7 @@ const readPanelState = () => {
 };
 
 /** Floating read-only window: the 3D view stays visible next to the mosaic while labelling. */
-export function Skeleton3D({ store, config, docked = false }) {
+export function Skeleton3D({ store, config, docked = false, popupOnly = false }) {
   const [state, setState] = useState({ status: "pending", data: null });
   // Temporary in-memory reconstruction history for the Trail / Path toggles.
   // No points or trajectories are saved into the Label Studio annotations.
@@ -63,7 +63,7 @@ export function Skeleton3D({ store, config, docked = false }) {
   }, [sceneView]);
 
   const openPopout = () => {
-    if (popout) {
+    if (popout && !popout.win.closed) {
       popout.win.focus();
       return;
     }
@@ -98,11 +98,12 @@ export function Skeleton3D({ store, config, docked = false }) {
     if (win && !win.closed) win.close();
   };
   useEffect(() => {
+    if (popupOnly) return undefined;
     const mainView = anchor.current?.closest(".main-view--skeleton3d");
     if (popout) mainView?.classList.add("main-view--skeleton3d-detached");
     else mainView?.classList.remove("main-view--skeleton3d-detached");
     return () => mainView?.classList.remove("main-view--skeleton3d-detached");
-  }, [popout]);
+  }, [popout, popupOnly]);
   useEffect(() => {
     if (!popout) return undefined;
     const handleClosed = () => {
@@ -209,7 +210,7 @@ export function Skeleton3D({ store, config, docked = false }) {
   const scene = (
     <section ref={box} aria-label="Live 3D skeleton"
       style={{
-        ...(docked ? {
+        ...(docked || popupOnly ? {
           position: "relative", width: "100%", height: popout ? "100vh" : "100%",
           minHeight: 0, maxHeight: "100%", overflow: "hidden",
           border: "none", borderRadius: 0, boxShadow: "none",
@@ -249,18 +250,18 @@ export function Skeleton3D({ store, config, docked = false }) {
         </span>
         {warnings.length > 0 && <span title="Warnings" style={{ fontSize: 11, color: "#b45309" }}>⚠{warnings.length}</span>}
         <span style={{ flex: 1 }} />
-        <button type="button" title={popout ? "Return 3D to the Label Studio editor" : "Open 3D in a separate window"}
+        <button type="button" title={popupOnly ? "Close the separate 3D window" : popout ? "Return 3D to the Label Studio editor" : "Open 3D in a separate window"}
           onClick={popout ? attachPopout : openPopout}
           style={{ border: "1px solid #cbd5e1", borderRadius: 4, padding: "4px 9px", background: "#f8fafc", fontSize: 12 }}>
-          {popout ? "Return to editor" : "Open in window ↗"}
+          {popupOnly ? "Close 3D" : popout ? "Return to editor" : "Open in window ↗"}
         </button>
-        {!docked && <button type="button" aria-expanded={!panel.collapsed} title={panel.collapsed ? "Expand" : "Collapse"}
+        {!docked && !popupOnly && <button type="button" aria-expanded={!panel.collapsed} title={panel.collapsed ? "Expand" : "Collapse"}
           onClick={() => setPanel((current) => ({ ...current, collapsed: !current.collapsed }))}
           style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "2px 6px" }}>
           {panel.collapsed ? "▢" : "–"}
         </button>}
       </header>
-      {(docked || !panel.collapsed) && (
+      {(docked || popupOnly || !panel.collapsed) && (
         <div style={{
           padding: "8px 10px 10px", overflow: "auto", flex: "1 1 auto",
           minHeight: 0, height: "100%", overscrollBehavior: "contain",
@@ -297,7 +298,7 @@ export function Skeleton3D({ store, config, docked = false }) {
               Open Warnings and Reconstruction quality below to identify the failing camera slots.
             </div>
           )}
-          <SkeletonCanvas3D data={safeData ?? { joints: [], edges: [] }} config={config} docked={docked}
+          <SkeletonCanvas3D data={safeData ?? { joints: [], edges: [] }} config={config} docked={docked || popupOnly}
             detached={Boolean(popout)} history={history.current}
             controlledView={sceneView} onChangeView={setSceneView}
             controlledOptions={sceneOptions} onChangeOptions={setSceneOptions}
@@ -324,6 +325,22 @@ export function Skeleton3D({ store, config, docked = false }) {
       )}
     </section>
   );
+  if (popupOnly) {
+    return (
+      <>
+        <button
+          type="button"
+          className="main-view__show-3d"
+          onClick={openPopout}
+          aria-label="Show 3D skeleton in a separate window"
+          title={popout && !popout.win.closed ? "Focus the open 3D window" : "Open live 3D skeleton on a second screen"}
+        >
+          Show 3D ↗
+        </button>
+        {popout && !popout.win.closed && createPortal(scene, popout.root)}
+      </>
+    );
+  }
   return (
     <>
       <span ref={anchor} style={{ display: "none" }} aria-hidden="true" />
