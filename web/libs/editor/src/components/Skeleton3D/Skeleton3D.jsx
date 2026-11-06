@@ -156,8 +156,14 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
           if (next.status === "pending" && previous.data) {
             return { ...next, data: previous.data, stale: true };
           }
-          if (next.status === "error" && previous.data) {
+          if ((next.status === "error" || next.status === "invalid") && previous.data) {
             return { ...next, data: previous.data, stale: true };
+          }
+          if (next.status === "ready" && !next.data?.joints?.length && previous.data) {
+            return {
+              ...next, data: previous.data, stale: true,
+              error: "No reconstructable joints in the current frame.",
+            };
           }
           return { ...next, stale: false };
         });
@@ -234,9 +240,10 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
     ...(data?.warnings ?? []).map((w) => (typeof w === "string" ? w : JSON.stringify(w))),
     ...(data?.rejected ?? []).map((r) => `${r.joint}: ${r.reason}`),
   ];
-  const status = state.status === "pending"
-    ? (state.stale ? "Loading new frame · showing previous pose" : "reconstructing…")
-    : state.status === "ready" ? (state.cached ? "cached frame · drag to orbit" : "drag to orbit · wheel to zoom") : "";
+  const status = state.stale
+    ? (state.status === "pending" ? "Loading frame · showing previous pose" : "Previous pose · current frame unavailable")
+    : state.status === "pending" ? "reconstructing…"
+      : state.status === "ready" ? (state.cached ? "cached frame · drag to orbit" : "drag to orbit · wheel to zoom") : "";
   const angles = safeData ? `L ${formatAngle(safeData.foot_tilt?.left)} · R ${formatAngle(safeData.foot_tilt?.right)}` : "";
   const scene = (
     <section ref={box} aria-label="Live 3D skeleton"
@@ -315,7 +322,7 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
           <div role="status" aria-live="polite" style={{
             fontSize: 12, color: state.stale ? "#925d12" : "#b91c1c",
           }}>
-            {state.stale && <span>Previous 3D pose is visible while the current frame updates. </span>}
+            {state.stale && <span>Showing the previous 3D pose until this frame has a valid reconstruction. </span>}
             {state.error}
           </div>
           {rejectedByQuality.length > 0 && (
