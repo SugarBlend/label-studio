@@ -30,7 +30,6 @@ import { isStarterCloudPlan } from "@humansignal/core";
 import { cn } from "../../utils/bem";
 import { FF_BULK_ANNOTATION, FF_LSDV_4620_3_ML, FF_SIMPLE_INIT, isFF } from "../../utils/feature-flags";
 import { reactCleaner } from "../../utils/reactCleaner";
-import { guidGenerator } from "../../utils/unique";
 import { isDefined, sortAnnotations } from "../../utils/utilities";
 import { queryClient } from "@humansignal/core/lib/utils/query-client";
 import { ToastProvider, ToastViewport } from "@humansignal/ui/lib/toast/toast";
@@ -147,28 +146,33 @@ class App extends Component {
     return <Result icon={<Spin size="large" />} />;
   }
 
-  _renderUI(root, as) {
-    if (as.viewingAll && getRoot(as).hasInterface("annotations:view-all")) {
+  _renderUI(root, as, fallback = null) {
+    const skeleton3d = getEnv(this.props.store).skeleton3d;
+
+    if (!skeleton3d?.enabled && as.viewingAll && getRoot(as).hasInterface("annotations:view-all")) {
       return this.renderAllAnnotations();
     }
 
-    const skeleton3d = getEnv(this.props.store).skeleton3d;
-
+    // Keep the launcher mounted across annotation and frame changes: its
+    // secondary window is a live React portal, never a second editor.
     return (
       <div
-        key={(as.selectedHistory ?? as.selected)?.id}
-        className={`${cn("main-view").toClassName()}${skeleton3d?.enabled ? " main-view--skeleton3d" : ""}`}
+        className={cn("main-view").mod({ skeleton3d: Boolean(skeleton3d?.enabled) }).toClassName()}
         onScrollCapture={this._notifyScroll}
       >
         {skeleton3d?.enabled && (
-          <div className="main-view__skeleton-panel">
-            <Skeleton3D store={this.props.store} config={skeleton3d} docked />
+          <div className={cn("main-view").elem("skeleton-launcher").toClassName()}>
+            <Skeleton3D store={this.props.store} config={skeleton3d} popupOnly />
           </div>
         )}
         <div className={cn("main-view").elem("annotation").toClassName()}>
-          {<Annotation root={root} annotation={as.selected} />}
-          {this.renderRelations(as.selected)}
-          {this.renderCommentsOverlay(as.selected)}
+          {fallback ?? (root && as.selected ? (
+            <>
+              <Annotation root={root} annotation={as.selected} />
+              {this.renderRelations(as.selected)}
+              {this.renderCommentsOverlay(as.selected)}
+            </>
+          ) : null)}
         </div>
       </div>
     );
@@ -204,7 +208,7 @@ class App extends Component {
 
     return (
       <RelationsOverlay
-        key={guidGenerator()}
+        key={selectedStore.id}
         store={store}
         ref={this.relationsRef}
         tags={selectedStore.names}
@@ -227,28 +231,32 @@ class App extends Component {
     const root = as.selected && as.selected.root;
     const { settings } = store;
 
-    if (store.isLoading) return this.renderLoader();
-
-    if (store.noTask) return this.renderNothingToLabel(store);
-
-    if (store.noAccess) return this.renderNoAccess();
-
-    if (store.labeledSuccess) return this.renderSuccess();
-
-    if (!root) return this.renderNoAnnotation();
+    const skeletonEnabled = getEnv(store).skeleton3d?.enabled;
+    // In 3D mode we keep the same App subtree mounted during task/frame
+    // changes. In particular, do not replace it with a spinner when loading.
+    if (!skeletonEnabled) {
+      if (store.isLoading) return this.renderLoader();
+      if (store.noTask) return this.renderNothingToLabel(store);
+      if (store.noAccess) return this.renderNoAccess();
+      if (store.labeledSuccess) return this.renderSuccess();
+      if (!root) return this.renderNoAnnotation();
+    }
 
     const viewingAll = as.viewingAll;
-
-    // tags can be styled in config when user is awaiting for suggestions from ML backend
+    const fallback = store.isLoading ? this.renderLoader()
+      : store.noTask ? this.renderNothingToLabel(store)
+      : store.noAccess ? this.renderNoAccess()
+      : store.labeledSuccess ? this.renderSuccess()
+      : !root ? this.renderNoAnnotation()
+      : as.validation !== null ? this.renderConfigValidationException(store)
+      : null;
     const mainContent = (
       <div
         className={cn("main-content")
           .mix(...(store.awaitingSuggestions ? ["requesting"] : []))
           .toClassName()}
       >
-        {as.validation === null
-          ? this._renderUI(as.selectedHistory?.root ?? root, as)
-          : this.renderConfigValidationException(store)}
+        {this._renderUI(as.selectedHistory?.root ?? root, as, fallback)}
       </div>
     );
 
@@ -270,7 +278,7 @@ class App extends Component {
                 {store.description}
               </InstructionsModal>
 
-              {isDefined(store) && store.hasInterface("topbar") && <TopBar store={store} />}
+              {isDefined(store) && !store.isLoading && root && store.hasInterface("topbar") && <TopBar store={store} />}
               <div
                 className={cn("wrapper")
                   .mod({
@@ -280,10 +288,10 @@ class App extends Component {
                   })
                   .toClassName()}
               >
-                {isBulkMode || !store.hasInterface("side-column") ? (
+                {isBulkMode || !store.hasInterface("side-column") || !as.selected ? (
                   <>
                     {mainContent}
-                    {store.hasInterface("topbar") && <BottomBar store={store} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} />}
                   </>
                 ) : (
                   <SideTabsPanels
@@ -295,7 +303,7 @@ class App extends Component {
                     focusTab={store.commentStore.tooltipMessage ? "comments" : null}
                   >
                     {mainContent}
-                    {store.hasInterface("topbar") && <BottomBar store={store} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} />}
                   </SideTabsPanels>
                 )}
               </div>

@@ -236,6 +236,8 @@ def test_org_admin_flag(setup):
     assert r.json()['is_admin'] is True
 
     assert member.get('/api/current-user/whoami').json()['is_org_admin'] is True
+    assert member.get('/api/current-user/whoami').json()['can_manage_project_settings'] is True
+    assert member.get(f'/projects/{project.id}/settings/').status_code == 200
     assert project.id in _project_ids(member)
     assert member.get(f'/api/projects/{project.id}/access/').status_code == 200
 
@@ -274,3 +276,72 @@ def test_everything_open_when_access_control_disabled(setup):
     assert project.id in _project_ids(member)
     assert member.get(f'/api/tasks/{task.id}/').status_code == 200
     assert member.get('/api/current-user/whoami').json()['is_org_admin'] is True
+
+
+@pytest.mark.django_db
+def test_project_settings_owner_admin_only_but_labeling_still_allowed(setup):
+    owner, member, project, task = setup
+    _grant(owner, project, member.user)
+    assert owner.get(f'/projects/{project.id}/settings/').status_code == 200
+    assert owner.get(f'/projects/{project.id}/settings/access').status_code == 200
+
+    for path in (
+        f'/projects/{project.id}/settings/',
+        f'/projects/{project.id}/settings/access',
+        f'/projects/{project.id}/settings/skeleton-3d',
+    ):
+        assert member.get(path).status_code == 403, path
+
+    assert member.get(f'/api/projects/{project.id}/').status_code == 200
+    assert member.get(f'/api/tasks/{task.id}/').status_code == 200
+    assert member.get('/api/current-user/whoami').json()['can_manage_project_settings'] is False
+    assert owner.get('/api/current-user/whoami').json()['can_manage_project_settings'] is True
+
+    for method in ("patch", "put"):
+        response = getattr(member, method)(
+            f'/api/projects/{project.id}/',
+            data=json.dumps({'title': 'No changes', 'skeleton_3d_config': {'enabled': False, 'cameras': []}}),
+            content_type='application/json',
+        )
+        assert response.status_code == 403, (method, response.content)
+    project.refresh_from_db()
+    assert project.title == 'Secret'
+
+
+@pytest.mark.django_db
+@override_settings(PROJECT_ACCESS_CONTROL_ENABLED=False)
+def test_settings_remain_admin_only_when_access_control_disabled(setup):
+    owner, member, project, task = setup
+    assert member.get(f'/api/projects/{project.id}/').status_code == 200
+    assert member.get(f'/api/tasks/{task.id}/').status_code == 200
+    assert member.get(f'/projects/{project.id}/settings/').status_code == 403
+    assert member.patch(
+        f'/api/projects/{project.id}/',
+        data=json.dumps({'title': 'Not allowed'}),
+        content_type='application/json',
+    ).status_code == 403
+    assert member.get('/api/current-user/whoami').json()['can_manage_project_settings'] is False
+    assert owner.get('/api/current-user/whoami').json()['can_manage_project_settings'] is True
+    assert member.get(f'/api/projects/{project.id}/access/').status_code == 403
+
+
+@pytest.mark.django_db
+def test_owner_can_manage_settings_and_members_cannot_configure_ml_or_storage(setup):
+    owner, member, project, task = setup
+    _grant(owner, project, member.user)
+    update = owner.patch(
+        f'/api/projects/{project.id}/',
+        data=json.dumps({'description': 'Admin change'}),
+        content_type='application/json',
+    )
+    assert update.status_code == 200, update.content
+    project.refresh_from_db()
+    assert project.description == 'Admin change'
+
+    # Permission checks must run before any ML handshake or storage validation.
+    assert member.post('/api/ml/', data=json.dumps({
+        'project': project.id, 'url': 'http://127.0.0.1:9',
+    }), content_type='application/json').status_code == 403
+    assert member.post('/api/storages/s3/', data=json.dumps({
+        'project': project.id,
+    }), content_type='application/json').status_code == 403

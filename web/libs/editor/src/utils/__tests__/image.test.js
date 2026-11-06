@@ -197,6 +197,63 @@ describe("getTransformedImageData", () => {
   });
 });
 
+describe("KeyPointRegion edge dragging", () => {
+  const image = {
+    fixForZoomWrapper: (pos, fn) => fn(pos),
+    canvasToInternalX: (x) => x / 2,
+    canvasToInternalY: (y) => y / 2,
+    internalToCanvasX: (x) => x * 2,
+    internalToCanvasY: (y) => y * 2,
+    selectedRegionsBBox: null,
+  };
+
+  it.each([
+    [{ x: -20, y: -30 }, { x: 0, y: 0 }],
+    [{ x: 220, y: 240 }, { x: 200, y: 200 }],
+    [{ x: 1, y: 199 }, { x: 1, y: 199 }],
+    [{ x: 100, y: 100 }, { x: 100, y: 100 }],
+  ])("allows point centre to reach the whole image: %p", (position, expected) => {
+    const item = {
+      type: "keypointregion",
+      parent: image,
+      selected: true,
+      inSelection: false,
+      bboxCoords: { left: 47, top: 47, right: 53, bottom: 53 },
+    };
+    expect(createDragBoundFunc(item)(position)).toEqual(expected);
+  });
+
+  it("lets an individually dragged keypoint reach the edge even when it is selected as part of a group", () => {
+    const item = {
+      type: "keypointregion",
+      parent: {
+        ...image,
+        selectedRegionsBBox: { left: 30, top: 30, right: 60, bottom: 60 },
+      },
+      selected: false,
+      inSelection: true,
+      bboxCoords: { left: 45, top: 45, right: 55, bottom: 55 },
+    };
+    // Dragging this keypoint Circle must not use the group's bounding box.
+    // Group drags are handled by TransformerBack rather than this function.
+    expect(createDragBoundFunc(item)({ x: 200, y: 200 })).toEqual({ x: 200, y: 200 });
+    expect(createDragBoundFunc(item)({ x: -20, y: -20 })).toEqual({ x: 0, y: 0 });
+  });
+
+  it("preserves rectangle bounds for non-keypoint shapes", () => {
+    const item = {
+      type: "rectangleregion",
+      parent: image,
+      selected: true,
+      inSelection: false,
+      bboxCoords: { left: 40, top: 40, right: 60, bottom: 60 },
+    };
+    const constrained = createDragBoundFunc(item)({ x: 200, y: 200 });
+    expect(constrained.x).toBeLessThan(200);
+    expect(constrained.y).toBeLessThan(200);
+  });
+});
+
 describe("createDragBoundFunc", () => {
   it("returns a function that applies offset and fixRectToFit via fixForZoomWrapper", () => {
     const image = {

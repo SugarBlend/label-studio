@@ -20,6 +20,8 @@ export type APIUser = {
   permissions?: Ability[];
   /** Admin of the active organization: sees all projects, creates projects, manages project access */
   is_org_admin?: boolean;
+  /** Only organization owners/admins may enter or mutate project settings, regardless of access flags */
+  can_manage_project_settings?: boolean;
   /** Whether project access control is enabled on the server */
   project_access_control?: boolean;
 };

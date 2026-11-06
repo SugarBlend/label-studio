@@ -11,7 +11,9 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from ml.models import MLBackend
 from ml.serializers import MLBackendSerializer, MLInteractiveAnnotatingRequest
-from projects.models import Project, Task
+from projects.models import Project
+from projects.access import ensure_project_settings_admin
+from tasks.models import Task
 from rest_framework import generics, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -144,6 +146,10 @@ class MLBackendListAPI(generics.ListCreateAPIView):
             project = None  # malformed payload: let the serializer reject it
         if project is not None:
             self.check_object_permissions(request, project)
+            ensure_project_settings_admin(request.user, project.organization)
+        else:
+            # Malformed inputs will still be validated by the serializer.
+            ensure_project_settings_admin(request.user)
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
@@ -238,8 +244,13 @@ class MLBackendDetailAPI(generics.RetrieveUpdateDestroyAPIView):
         return ml_backend
 
     def perform_update(self, serializer):
+        ensure_project_settings_admin(self.request.user, self.get_object().project.organization)
         ml_backend = serializer.save()
         ml_backend.update_state()
+
+    def perform_destroy(self, instance):
+        ensure_project_settings_admin(self.request.user, instance.project.organization)
+        super().perform_destroy(instance)
 
 
 @method_decorator(

@@ -10,12 +10,62 @@ export function normalizeJoint(label) {
     .replace(/_bigtoe$/, "_big_toe").replace(/_(smalltoe|little_toe|littletoe)$/, "_small_toe");
 }
 
-export function readSkeletonSnapshot(store) {
-  const annotation = store.annotationStore.selectedHistory ?? store.annotationStore.selected;
+const keypointRegions = (annotation) =>
+  (annotation?.regionStore?.regions ?? []).filter((region) => region.type === "keypointregion");
+
+/**
+ * Prefer the actual editable/selected annotation, not selectedHistory.
+ * A stale empty history item used to shadow the visible 2D annotation and
+ * incorrectly report that no camera observations were available.
+ *
+ * In Compare All, a selected empty annotation may coexist with visible
+ * predictions/annotations. Offer every populated source instead of silently
+ * combining potentially different skeletons.
+ */
+export function listSkeletonSources(store) {
+  const annotationStore = store.annotationStore;
+  const seen = new Set();
+  const result = [];
+  const add = (annotation) => {
+    if (!annotation || seen.has(annotation.id)) return;
+    seen.add(annotation.id);
+    const count = keypointRegions(annotation).length;
+    if (count > 0) {
+      result.push({
+        id: annotation.id,
+        type: annotation.type ?? "annotation",
+        label: annotation.createdBy || annotation.user?.email || annotation.id,
+        count,
+      });
+    }
+  };
+  add(annotationStore.selected);
+  add(annotationStore.selectedHistory);
+  (annotationStore.annotations ?? []).forEach(add);
+  (annotationStore.predictions ?? []).forEach(add);
+  return result;
+}
+
+export function readSkeletonSnapshot(store, sourceId = "auto") {
+  const annotationStore = store.annotationStore;
+  const sources = listSkeletonSources(store);
+  const active = annotationStore.selected;
+  const fallback = sources[0];
+  const selectedId = sourceId !== "auto" && sources.some((source) => source.id === sourceId)
+    ? sourceId
+    : (keypointRegions(active).length ? active?.id : fallback?.id);
+  const annotation = [
+    annotationStore.selected,
+    annotationStore.selectedHistory,
+    ...(annotationStore.annotations ?? []),
+    ...(annotationStore.predictions ?? []),
+  ].find((candidate) => candidate?.id === selectedId);
   return {
     task: store.task?.id,
     annotation: annotation?.id,
-    points: (annotation?.regionStore.regions ?? []).filter((r) => r.type === "keypointregion").map((r) => {
+    sourceId: annotation?.id ?? null,
+    sources,
+    points: keypointRegions(annotation).map((r) => {
       const image = r.parent;
       const entity = image?.findImageEntity?.(r.item_index ?? 0);
       return {

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { NavLink } from "react-router-dom";
 import { IconCheck, IconEllipsis, IconMinus, IconSparks } from "@humansignal/icons";
 import { Userpic, Button, Dropdown, Tooltip } from "@humansignal/ui";
+import { useIsOrgAdmin } from "../../hooks/useIsOrgAdmin";
 import { Menu, Pagination } from "../../components";
 import { cn } from "../../utils/bem";
 import { absoluteURL } from "../../utils/helpers";
@@ -59,6 +60,7 @@ export const EmptyProjectsList = ({ openModal, canCreate = true }) => {
 };
 
 const ProjectCard = ({ project }) => {
+  const { canManageProjectSettings } = useIsOrgAdmin();
   const color = useMemo(() => {
     return DEFAULT_CARD_COLORS.includes(project.color) ? null : project.color;
   }, [project]);
@@ -105,7 +107,7 @@ const ProjectCard = ({ project }) => {
               <Dropdown.Trigger
                 content={
                   <Menu contextual>
-                    <Menu.Item href={`/projects/${project.id}/settings`}>Settings</Menu.Item>
+                    {canManageProjectSettings && <Menu.Item href={`/projects/${project.id}/settings`}>Settings</Menu.Item>}
                     <Menu.Item href={`/projects/${project.id}/data?labeling=1`}>Label</Menu.Item>
                   </Menu>
                 }

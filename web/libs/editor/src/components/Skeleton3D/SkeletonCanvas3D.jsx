@@ -37,8 +37,12 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
   const h = Math.max(1, bounds.height);
   // Use the destination window's DPI when the canvas is on another monitor.
   const dpr = Math.min(2, canvas.ownerDocument?.defaultView?.devicePixelRatio || 1);
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
+  // Updating these attributes clears the canvas; do it only when the actual
+  // pixel size changes, not on every reconstructed joint update.
+  const pixelWidth = Math.round(w * dpr);
+  const pixelHeight = Math.round(h * dpr);
+  if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+  if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -203,7 +207,11 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
 
   joints.slice().sort((a, b) => projected.get(b.joint).depth - projected.get(a.joint).depth).forEach((joint) => {
     const p = projected.get(joint.joint);
-    const colour = options.colour === "neutral" ? BONE : colorOf(joint.joint);
+    // Toe landmarks are intentionally distinct from the body-side palette:
+    // big toes are red, small toes black (left AND right).
+    const colour = joint.joint.endsWith("_big_toe") ? "#e53935"
+      : joint.joint.endsWith("_small_toe") ? "#171717"
+        : options.colour === "neutral" ? BONE : colorOf(joint.joint);
     const radiusPx = Math.max(2.1, 4.1 * options.size);
     const halo = ctx.createRadialGradient(p.x - radiusPx * 0.38, p.y - radiusPx * 0.45, 0.6, p.x, p.y, radiusPx * 1.1);
     halo.addColorStop(0, "#ffffff");
@@ -316,7 +324,11 @@ export function SkeletonCanvas3D({
   const toggles = [["labels", "Labels"], ["cameras", "Cameras"], ["rays", "Rays"],
     ["shadow", "Shadow"], ["trail", "Trail"], ["path", "Path"], ["soles", "Soles"]];
   return (
-    <section style={{ display: "flex", flexDirection: "column", width: "100%", minWidth: 0, flex: detached ? "1 1 auto" : undefined, minHeight: 0 }}>
+    <section style={{
+      display: "flex", flexDirection: "column", width: "100%", minWidth: 0,
+      height: docked ? "100%" : undefined,
+      flex: detached ? "1 1 auto" : undefined, minHeight: 0,
+    }}>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 7, padding: "7px 4px", fontSize: 12, background: "#fff" }}>
         <label>Colour{" "}
           <select value={options.colour} onChange={(e) => setOptions((old) => ({ ...old, colour: e.target.value }))}>
@@ -382,8 +394,10 @@ export function SkeletonCanvas3D({
           if (event.key === "-") setView((old) => ({ ...old, zoom: Math.max(0.3, old.zoom / 1.2) }));
         }}
         style={{
-          width: "100%", height: detached ? "calc(100vh - 140px)" : docked ? "min(66vh, 740px)" : 400,
-          minHeight: detached ? 260 : docked ? 430 : 260,
+          width: "100%",
+          height: detached ? "calc(100vh - 140px)" : docked ? "100%" : 400,
+          minHeight: detached ? 260 : docked ? 180 : 260,
+          flex: docked ? "1 1 auto" : undefined,
           display: "block", touchAction: "none", cursor: "grab",
         }}
       />

@@ -165,62 +165,73 @@ body {
 :global(.ant-result-success .ant-result-icon>.anticon) {
   color: var(--color-positive-icon);
 }
-// Multi-camera mode: keep the native editable Label Studio image stage in the
-// right-hand pane. Only its container is resized; image/region coordinates,
-// Konva transforms, and save/undo behavior remain unchanged.
-.main-view--skeleton3d {
-  display: grid;
-  grid-template-columns: minmax(310px, 44%) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  align-items: stretch;
-  min-width: 0;
+// 3D is a separate browser window. Do not split the native 2D Konva stage
+// or reserve any vertical space for a hidden 3D canvas.
+.main-content {
   min-height: 0;
-  overflow: hidden;
-  background: #e9edf4;
-
-  > .main-view__annotation {
-    min-width: 0;
-    min-height: 0;
-    margin: 0;
-    padding: 12px;
-    overflow: auto;
-    background: #f0f3f8;
-    border-left: 3px solid #273245;
-  }
 }
 
-.main-view__skeleton-panel {
+.main-view_skeleton3d {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
   min-width: 0;
   min-height: 0;
   height: 100%;
-  overflow: auto;
-  background: #f6f8fc;
-}
+  width: 100%;
+  overflow: hidden;
 
-@media (max-width: 950px) {
-  .main-view--skeleton3d {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(300px, 43vh) minmax(0, 1fr);
-
-    > .main-view__annotation {
-      border-left: 0;
-      border-top: 3px solid #273245;
-    }
-  }
-}
-
-// When 3D is detached, only the native 2D annotation editor remains in the
-// main window. The React portal continues rendering live into its own window.
-.main-view--skeleton3d.main-view--skeleton3d-detached {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-
-  > .main-view__skeleton-panel {
-    display: none;
+  > .main-view__skeleton-launcher {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-height: 48px;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--color-neutral-border);
+    background: var(--color-neutral-background);
   }
 
   > .main-view__annotation {
-    border-left: 0;
+    flex: 1 1 auto;
     min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 8px 12px;
+  }
+
+  .main-view__show-3d {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 7px 13px;
+    border: 1px solid var(--color-neutral-border);
+    border-radius: 7px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+    color: var(--color-neutral-content);
+    background: var(--color-neutral-surface);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 140ms ease, border-color 140ms ease;
+
+    &:hover {
+      background: var(--color-neutral-background);
+      border-color: var(--color-primary-border, #8db9eb);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary-border, #60a5fa);
+      outline-offset: 2px;
+    }
+
   }
 }

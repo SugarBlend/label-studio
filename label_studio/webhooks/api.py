@@ -5,7 +5,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from projects import models as project_models
-from projects.access import accessible_projects_q
+from projects.access import accessible_projects_q, ensure_project_settings_admin
 from rest_framework import generics
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -81,6 +81,7 @@ class WebhookListAPI(generics.ListCreateAPIView):
             raise NotFound('Project not found.')
         if not project.has_permission(self.request.user):
             raise PermissionDenied('You do not have permission to create webhooks for this project.')
+        ensure_project_settings_admin(self.request.user, project.organization)
         serializer.save(organization=self.request.user.active_organization)
 
 
@@ -142,6 +143,14 @@ class WebhookAPI(generics.RetrieveUpdateDestroyAPIView):
         PUT=all_permissions.webhooks_change,
         DELETE=all_permissions.webhooks_change,
     )
+
+    def perform_update(self, serializer):
+        ensure_project_settings_admin(self.request.user, self.get_object().organization)
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        ensure_project_settings_admin(self.request.user, instance.organization)
+        super().perform_destroy(instance)
 
     def get_serializer_class(self):
         if self.request.method in ['PUT', 'PATCH']:
