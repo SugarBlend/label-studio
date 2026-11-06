@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 const load = async (name) => import(`data:text/javascript;base64,${Buffer.from(await readFile(new URL(name, import.meta.url))).toString("base64")}`);
-const { adaptSkeleton, normalizeJoint, readSkeletonSnapshot, createReconstructionRunner } = await load("adapter.js");
+const { adaptSkeleton, normalizeJoint, readSkeletonSnapshot, listSkeletonSources, createReconstructionRunner } = await load("adapter.js");
 const { requestReconstruction } = await load("request.js");
 const config = { cameras: [0, 1, 2, 3].map((slot) => ({ slot, image_width: 640, image_height: 480, calibration: {} })) };
 const point = (id, x, y, group = "") => ({ id, x, y, group, image: "img", index: 0, width: 1280, height: 960, labels: ["left big toe"] });
@@ -57,11 +57,33 @@ test("reads live coordinates, history, deletion and relations without serializin
   region.x = 18;
   assert.equal(readSkeletonSnapshot(store).points[0].x, 18);
   store.annotationStore.selectedHistory = { ...selected, id: "history", regionStore: { regions: [] } };
-  assert.equal(readSkeletonSnapshot(store).annotation, "history");
-  assert.equal(readSkeletonSnapshot(store).points.length, 0);
-  delete store.annotationStore.selectedHistory;
+  // Stale empty selectedHistory must not hide populated active annotation.
+  assert.equal(readSkeletonSnapshot(store).annotation, "ann");
+  assert.equal(readSkeletonSnapshot(store).points.length, 1);
   selected.regionStore.regions = [];
   assert.equal(readSkeletonSnapshot(store).points.length, 0);
+});
+test("empty selected annotation falls back to populated prediction and allows explicit source selection", () => {
+  const make = (id, type, count) => ({
+    id, type, createdBy: id,
+    regionStore: { regions: Array.from({ length: count }, (_, index) => ({
+      ...point(id + index, 30, 30), type: "keypointregion",
+      parent: { name: "img", findImageEntity: () => ({ imageLoaded: true, naturalWidth: 1280, naturalHeight: 960 }) },
+    })) },
+    relationStore: { relations: [] },
+  });
+  const empty = make("empty", "annotation", 0);
+  const predicted = make("pred", "prediction", 3);
+  const annotated = make("annot", "annotation", 4);
+  const store = {
+    task: { id: 1923 },
+    annotationStore: { selected: empty, selectedHistory: null, annotations: [empty, annotated], predictions: [predicted] },
+  };
+  assert.deepEqual(listSkeletonSources(store).map((s) => s.id), ["annot", "pred"]);
+  assert.equal(readSkeletonSnapshot(store).annotation, "annot");
+  assert.equal(readSkeletonSnapshot(store, "pred").points.length, 3);
+  assert.equal(readSkeletonSnapshot(store, "pred").annotation, "pred");
+  assert.equal(readSkeletonSnapshot(store, "removed").annotation, "annot");
 });
 test("latest-only runner debounces, aborts and ignores stale task/annotation/calibration results", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
