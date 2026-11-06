@@ -34,13 +34,31 @@ export function Skeleton3D({ store, config, docked = false }) {
   const [popout, setPopout] = useState(null);
   // Hoist the scene controls so that detaching/reattaching the portal never
   // resets the orbit, visual layers, or selected joint.
-  const [sceneView, setSceneView] = useState({ yaw: -1.1, pitch: 0.23, zoom: 1, pan: [0, 0] });
+  const [sceneView, setSceneView] = useState(() => {
+    const defaults = { yaw: -1.1, pitch: 0.23, zoom: 1, pan: [0, 0] };
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("ls.skeleton3d.camera") ?? "null");
+      return saved &&
+        Number.isFinite(saved.yaw) && Number.isFinite(saved.pitch) &&
+        Number.isFinite(saved.zoom) && saved.zoom > 0 &&
+        Array.isArray(saved.pan) && saved.pan.length === 2 && saved.pan.every(Number.isFinite)
+        ? { yaw: saved.yaw, pitch: saved.pitch, zoom: saved.zoom, pan: saved.pan }
+        : defaults;
+    } catch {
+      return defaults;
+    }
+  });
   const [sceneOptions, setSceneOptions] = useState({
     colour: "body", size: 1, grid: true, labels: true,
     labelNames: false, cameras: false, rays: false,
     shadow: true, trail: false, path: false, soles: true,
   });
   const [selectedJoint, setSelectedJoint] = useState(null);
+  useEffect(() => {
+    try { window.localStorage.setItem("ls.skeleton3d.camera", JSON.stringify(sceneView)); }
+    catch { /* Local storage can be disabled in private mode. */ }
+  }, [sceneView]);
+
   const openPopout = () => {
     if (popout) {
       popout.win.focus();
@@ -115,7 +133,11 @@ export function Skeleton3D({ store, config, docked = false }) {
             if (JSON.stringify(frame) !== JSON.stringify(last)) history.current = [...history.current, frame].slice(-90);
           }
         }
-        setState(next);
+        // Keep the last good 3D pose on screen during the debounce/request:
+        // otherwise dragging one 2D point unmounts the 3D canvas on every tick.
+        setState((previous) => next.status === "pending" && previous.data
+          ? { ...next, data: previous.data }
+          : next);
       },
     });
     let currentTask = null;
@@ -127,6 +149,7 @@ export function Skeleton3D({ store, config, docked = false }) {
           currentTask = current.task;
           history.current = [];
           setSelectedJoint(null);
+          setState({ status: "pending", data: null, error: null, notes: [] });
         }
         runner.update({ ...adaptSkeleton(current, settings), config: settings });
       },
@@ -182,7 +205,9 @@ export function Skeleton3D({ store, config, docked = false }) {
     <section ref={box} aria-label="Live 3D skeleton"
       style={{
         ...(docked ? {
-          position: "relative", width: "100%", minHeight: popout ? "100vh" : "100%", maxHeight: "none", border: "none", borderRadius: 0, boxShadow: "none",
+          position: "relative", width: "100%", height: popout ? "100vh" : "100%",
+          minHeight: 0, maxHeight: "100%", overflow: "hidden",
+          border: "none", borderRadius: 0, boxShadow: "none",
         } : {
           position: "fixed", zIndex: 1200, width: "min(440px, 92vw)", maxHeight: "80vh",
           border: "1px solid #cbd5e1", borderRadius: 8, boxShadow: "0 10px 28px rgba(15, 23, 42, 0.18)",
@@ -231,7 +256,10 @@ export function Skeleton3D({ store, config, docked = false }) {
         </button>}
       </header>
       {(docked || !panel.collapsed) && (
-        <div style={{ padding: "8px 10px 10px", overflow: "auto", flex: popout ? "1 1 auto" : undefined, minHeight: 0 }}>
+        <div style={{
+          padding: "8px 10px 10px", overflow: "auto", flex: "1 1 auto",
+          minHeight: 0, height: "100%", overscrollBehavior: "contain",
+        }}>
           <div role="status" aria-live="polite" style={{ fontSize: 12, color: "#b91c1c" }}>{state.error}</div>
           {rejectedByQuality.length > 0 && (
             <div role="alert" style={{
@@ -249,11 +277,11 @@ export function Skeleton3D({ store, config, docked = false }) {
               Open Warnings and Reconstruction quality below to identify the failing camera slots.
             </div>
           )}
-          {safeData && <SkeletonCanvas3D data={safeData} config={config} docked={docked}
+          <SkeletonCanvas3D data={safeData ?? { joints: [], edges: [] }} config={config} docked={docked}
             detached={Boolean(popout)} history={history.current}
             controlledView={sceneView} onChangeView={setSceneView}
             controlledOptions={sceneOptions} onChangeOptions={setSceneOptions}
-            controlledSelectedJoint={selectedJoint} onChangeSelectedJoint={setSelectedJoint} />}
+            controlledSelectedJoint={selectedJoint} onChangeSelectedJoint={setSelectedJoint} />
           {!data && <p style={{ fontSize: 12, color: "#475569" }}>Waiting for keypoints in at least two camera slots.</p>}
           <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
             Triangulation only, no fitting. Geometric angle, not a clinical assessment; positive means the big toe is higher.
