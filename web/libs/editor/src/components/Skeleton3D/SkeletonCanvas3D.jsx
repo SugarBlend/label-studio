@@ -395,9 +395,12 @@ export function SkeletonCanvas3D({
         }}
         style={{
           width: "100%",
-          height: detached ? "calc(100vh - 140px)" : docked ? "100%" : 400,
-          minHeight: detached ? 260 : docked ? 180 : 260,
-          flex: docked ? "1 1 auto" : undefined,
+          // Fill the fixed viewport assigned by Skeleton3D. Do not size from
+          // 100vh: the status panel below reserves space independently.
+          height: docked ? "100%" : 400,
+          minHeight: docked ? 0 : 260,
+          minWidth: 0,
+          flex: docked ? "1 1 0" : undefined,
           display: "block", touchAction: "none", cursor: "grab",
         }}
       />
