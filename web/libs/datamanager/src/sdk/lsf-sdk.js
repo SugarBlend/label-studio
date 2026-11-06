@@ -341,7 +341,20 @@ export class LSFWrapper {
       const instantLoad = !this.labelStream && isDefined(taskID) && isInstantSwitchEnabled() && isTaskDataReady(taskID);
       const loadWrapper = instantLoad
         ? (callback) => callback.call(this)
-        : (callback) => this.withinLoadingState(callback);
+        : async (callback) => {
+          // Keep the currently annotated 2D frame visible but non-interactive
+          // while the next task JSON is fetched fresh. Unlike a loader this
+          // does not unmount the canvas or leave a white image area.
+          if (!this.labelStream && isInstantSwitchEnabled() && this.lsf?.task) {
+            this.setFrozen(true);
+            try {
+              return await callback.call(this);
+            } finally {
+              this.setFrozen(false);
+            }
+          }
+          return this.withinLoadingState(callback);
+        };
 
       const newTask = await loadWrapper(async () => {
         let nextTask;
@@ -415,10 +428,14 @@ export class LSFWrapper {
     const instantSwitch = isInstantSwitchEnabled() && areTaskImagesReady(task);
 
     if (!instantSwitch) {
-      this.setLoading(true, hasChangedTasks);
-
-      // Let the browser paint the loading indicator before heavy store operations
-      await waitForPaint();
+      if (isInstantSwitchEnabled() && this.lsf?.task) {
+        // Keep the old frame visible until the new task is ready. Blocking
+        // input avoids edits to the wrong task during this transition.
+        this.setFrozen(true);
+      } else {
+        this.setLoading(true, hasChangedTasks);
+        await waitForPaint();
+      }
     }
 
     if (!this.lsf) return;
