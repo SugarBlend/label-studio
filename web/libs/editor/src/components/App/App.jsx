@@ -153,18 +153,13 @@ class App extends Component {
       return this.renderAllAnnotations();
     }
 
-    // Keep the launcher mounted across annotation and frame changes: its
-    // secondary window is a live React portal, never a second editor.
+    // The Show 3D launcher is owned by the stable App root, not by the
+    // task-dependent main view or SideTabsPanels.
     return (
       <div
         className={cn("main-view").mod({ skeleton3d: Boolean(skeleton3d?.enabled) }).toClassName()}
         onScrollCapture={this._notifyScroll}
       >
-        {skeleton3d?.enabled && (
-          <div className={cn("main-view").elem("skeleton-launcher").toClassName()}>
-            <Skeleton3D store={this.props.store} config={skeleton3d} popupOnly />
-          </div>
-        )}
         <div className={cn("main-view").elem("annotation").toClassName()}>
           {fallback ?? (root && as.selected ? (
             <>
@@ -279,6 +274,14 @@ class App extends Component {
               </InstructionsModal>
 
               {isDefined(store) && !store.isLoading && root && store.hasInterface("topbar") && <TopBar store={store} />}
+              {/* Keep the 3D portal outside annotation-dependent SideTabsPanels:
+                  that wrapper changes while loading the next task and must not
+                  destroy the popup or reset its live reconstruction state. */}
+              {skeletonEnabled && (
+                <div className={cn("main-view").elem("skeleton-launcher").toClassName()}>
+                  <Skeleton3D store={store} config={getEnv(store).skeleton3d} popupOnly />
+                </div>
+              )}
               <div
                 className={cn("wrapper")
                   .mod({
