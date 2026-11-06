@@ -12,7 +12,8 @@ from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_sche
 from ml.models import MLBackend
 from ml.serializers import MLBackendSerializer, MLInteractiveAnnotatingRequest
 from projects.models import Project
-from projects.access import ensure_project_settings_admin, Task
+from projects.access import ensure_project_settings_admin
+from tasks.models import Task
 from rest_framework import generics, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
