@@ -1,3 +1,4 @@
+import React from "react";
 import { observer } from "mobx-react";
 import { Layer, Line } from "react-konva";
 import { normalizeJoint } from "../Skeleton3D/adapter";
