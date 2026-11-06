@@ -151,9 +151,13 @@ export function createDragBoundFunc(item, offset = { x: 0, y: 0 }) {
       // coordinates (0..100). Its visual width is not a bounding-box width.
       // Treating it as a rectangle wrongly stops the centre several percent
       // before the right/bottom edges (and changes with marker size).
-      // Keep the legacy bounding-box constraint for multi-region drags and
-      // every other region type.
-      if (item.type === "keypointregion" && singleRegionDragging) {
+      // Dragging the Circle always moves only this KeyPointRegion, even when
+      // it belongs to a multi-region selection. Its "selected" getter means
+      // "highlightedNode", whereas "inSelection" means selection membership;
+      // these can differ. Requiring singleRegionDragging here accidentally
+      // enabled group-bbox constraints and left an artificial edge margin.
+      // Group drags use the dedicated TransformerBack in ImageView.
+      if (item.type === "keypointregion") {
         return {
           x: image.internalToCanvasX(Math.max(0, Math.min(100, x))),
           y: image.internalToCanvasY(Math.max(0, Math.min(100, y))),
