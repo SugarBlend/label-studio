@@ -145,9 +145,23 @@ export function createDragBoundFunc(item, offset = { x: 0, y: 0 }) {
       x = image.canvasToInternalX(x);
       y = image.canvasToInternalY(y);
 
+      const singleRegionDragging = item.selected || !item.inSelection;
+
+      // A KeyPointRegion stores the CENTRE of the marker in image-relative
+      // coordinates (0..100). Its visual width is not a bounding-box width.
+      // Treating it as a rectangle wrongly stops the centre several percent
+      // before the right/bottom edges (and changes with marker size).
+      // Keep the legacy bounding-box constraint for multi-region drags and
+      // every other region type.
+      if (item.type === "keypointregion" && singleRegionDragging) {
+        return {
+          x: image.internalToCanvasX(Math.max(0, Math.min(100, x))),
+          y: image.internalToCanvasY(Math.max(0, Math.min(100, y))),
+        };
+      }
+
       x -= offset.x;
       y -= offset.y;
-      const singleRegionDragging = item.selected || !item.inSelection;
       const { top, left, right, bottom } = item.bboxCoords;
       const { top: srTop, left: srLeft, right: srRight, bottom: srBottom } = image?.selectedRegionsBBox || {};
       const bbox = singleRegionDragging
