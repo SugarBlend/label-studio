@@ -4,6 +4,7 @@ import { reaction } from "mobx";
 import { adaptSkeleton, createReconstructionRunner, readSkeletonSnapshot } from "./adapter";
 import { requestReconstruction } from "./request";
 import { SkeletonCanvas3D } from "./SkeletonCanvas3D";
+import { cn } from "../../utils/bem";
 
 const formatAngle = (value) => (Number.isFinite(value) ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)}°` : "n/a");
 
@@ -333,7 +334,7 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
       <>
         <button
           type="button"
-          className="main-view__show-3d"
+          className={cn("main-view").elem("show-3d").toClassName()}
           onClick={openPopout}
           aria-label="Show 3D skeleton in a separate window"
           title={popout && !popout.win.closed ? "Focus the open 3D window" : "Open live 3D skeleton on a second screen"}
