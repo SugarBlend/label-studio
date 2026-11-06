@@ -279,7 +279,7 @@ class App extends Component {
                 {store.description}
               </InstructionsModal>
 
-              {isDefined(store) && store.hasInterface("topbar") && <TopBar store={store} />}
+              {isDefined(store) && !store.isLoading && root && store.hasInterface("topbar") && <TopBar store={store} />}
               <div
                 className={cn("wrapper")
                   .mod({
@@ -292,7 +292,7 @@ class App extends Component {
                 {isBulkMode || !store.hasInterface("side-column") || !as.selected ? (
                   <>
                     {mainContent}
-                    {store.hasInterface("topbar") && <BottomBar store={store} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} />}
                   </>
                 ) : (
                   <SideTabsPanels
@@ -304,7 +304,7 @@ class App extends Component {
                     focusTab={store.commentStore.tooltipMessage ? "comments" : null}
                   >
                     {mainContent}
-                    {store.hasInterface("topbar") && <BottomBar store={store} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} />}
                   </SideTabsPanels>
                 )}
               </div>
