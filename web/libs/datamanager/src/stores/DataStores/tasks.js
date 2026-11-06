@@ -156,9 +156,12 @@ export const create = (columns) => {
         if (isLabelStream) {
           taskParams.interaction = "labelstream";
         }
-        // FIT-720: Lazy load annotations - use stubs for both label stream and quick view modes
-        // Hydration happens in lsf-sdk.js when the annotation is selected
-        if (isActive(FF_FIT_720_LAZY_LOAD_ANNOTATIONS)) {
+        // FIT-720: Annotation stubs are hydrated in lsf-sdk only for
+        // label stream. Quick view does NOT hydrate stubs, so requesting
+        // them here silently drops every existing 2D KeyPointRegion.
+        // Fetch current full results in quick view, particularly when
+        // other annotators can update the same task.
+        if (isLabelStream && isActive(FF_FIT_720_LAZY_LOAD_ANNOTATIONS)) {
           taskParams.annotations_stub = true;
         }
         return taskParams;
