@@ -254,7 +254,7 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
         display: "flex", flexDirection: "column", background: "#ffffff",
       }}>
       <header
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", cursor: docked ? "default" : "grab", userSelect: "none", borderBottom: panel.collapsed && !docked ? "none" : "1px solid #e2e8f0" }}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", cursor: docked ? "default" : "grab", userSelect: "none", flex: "0 0 auto", minHeight: 42, borderBottom: panel.collapsed && !docked ? "none" : "1px solid #e2e8f0" }}
         onPointerDown={(event) => {
           if (docked || event.target.closest("button")) return;
           const rect = box.current?.getBoundingClientRect();
@@ -277,10 +277,6 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
         onPointerUp={() => { moving.current = null; }}
         onPointerCancel={() => { moving.current = null; }}>
         <strong style={{ fontSize: 13 }}>3D skeleton</strong>
-        <span style={{ fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {panel.collapsed && !docked ? angles : status}
-        </span>
-        {warnings.length > 0 && <span title="Warnings" style={{ fontSize: 11, color: "#b45309" }}>⚠{warnings.length}</span>}
         <span style={{ flex: 1 }} />
         <button type="button" title={popupOnly ? "Close the separate 3D window" : popout ? "Return 3D to the Label Studio editor" : "Open 3D in a separate window"}
           onClick={popout ? attachPopout : openPopout}
@@ -294,10 +290,35 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
         </button>}
       </header>
       {(docked || popupOnly || !panel.collapsed) && (
-        <div style={{
-          padding: "8px 10px 10px", overflow: "auto", flex: "1 1 auto",
-          minHeight: 0, height: "100%", overscrollBehavior: "contain",
-        }}>
+        <div style={{ display: "flex", flexDirection: "column", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>
+          {/* The viewport stays in place during frame/reconstruction changes. */}
+          <div data-testid="skeleton3d-viewport" style={{
+            display: "flex", flex: "1 1 0", minHeight: 0,
+            padding: "8px 10px 0", overflow: "hidden",
+          }}>
+          <SkeletonCanvas3D data={safeData ?? { joints: [], edges: [] }} config={config} docked={docked || popupOnly}
+            detached={Boolean(popout)} history={history.current}
+            controlledView={sceneView} onChangeView={setSceneView}
+            controlledOptions={sceneOptions} onChangeOptions={setSceneOptions}
+            controlledSelectedJoint={selectedJoint} onChangeSelectedJoint={setSelectedJoint} />
+          </div>
+          {/* Status, sources and quality notices have a fixed-height, scrollable
+              home below the drawing, so they cannot shift the 3D canvas. */}
+          <div data-testid="skeleton3d-diagnostics" style={{
+            flex: "0 0 164px", height: 164, minHeight: 0,
+            overflowY: "auto", overscrollBehavior: "contain",
+            padding: "8px 10px 10px",
+            borderTop: "1px solid #d9e2ec", background: "#fff",
+            fontSize: 12,
+          }}>
+            <div role="status" aria-live="polite" style={{
+              color: state.error ? "#b91c1c" : state.stale ? "#925d12" : "#475569",
+              marginBottom: 7,
+            }}>
+              {status}
+              {state.error ? ` · ${state.error}` : ""}
+              {state.stale && " · Previous pose remains visible until the current frame is ready."}
+            </div>
           {availableSources.length > 0 && (
             <label style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, paddingBottom: 7 }}>
               <strong>3D source</strong>
@@ -313,12 +334,6 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
               </select>
             </label>
           )}
-          <div role="status" aria-live="polite" style={{
-            fontSize: 12, color: state.stale ? "#925d12" : "#b91c1c",
-          }}>
-            {state.stale && <span>Showing the previous 3D pose until this frame has a valid reconstruction. </span>}
-            {state.error}
-          </div>
           {rejectedByQuality.length > 0 && (
             <div role="alert" style={{
               padding: "9px 11px", margin: "8px 0", border: "1px solid #f4b38c",
@@ -335,11 +350,7 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
               Open Warnings and Reconstruction quality below to identify the failing camera slots.
             </div>
           )}
-          <SkeletonCanvas3D data={safeData ?? { joints: [], edges: [] }} config={config} docked={docked || popupOnly}
-            detached={Boolean(popout)} history={history.current}
-            controlledView={sceneView} onChangeView={setSceneView}
-            controlledOptions={sceneOptions} onChangeOptions={setSceneOptions}
-            controlledSelectedJoint={selectedJoint} onChangeSelectedJoint={setSelectedJoint} />
+
           {!data && <p style={{ fontSize: 12, color: "#475569" }}>Waiting for keypoints in at least two camera slots.</p>}
           <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
             Triangulation only, no fitting. Geometric angle, not a clinical assessment; positive means the big toe is higher.
@@ -358,6 +369,9 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
               ))}</ul>
             </details>
           )}
+
+            {angles && <div style={{ color: "#64748b", fontSize: 11 }}>Foot tilt: {angles}</div>}
+          </div>
         </div>
       )}
     </section>
