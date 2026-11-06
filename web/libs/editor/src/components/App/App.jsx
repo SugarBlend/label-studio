@@ -153,14 +153,18 @@ class App extends Component {
       return this.renderAllAnnotations();
     }
 
-    // The 3D component must live outside of the annotation's changing key:
-    // switching frames/annotations must not close its portal or reset its orbit.
-    // The parent grid remains mounted even when a reconstruction is pending.
+    // Keep the launcher mounted across annotation and frame changes: its
+    // secondary window is a live React portal, never a second editor.
     return (
       <div
         className={`${cn("main-view").toClassName()}${skeleton3d?.enabled ? " main-view--skeleton3d" : ""}`}
         onScrollCapture={this._notifyScroll}
       >
+        {skeleton3d?.enabled && (
+          <div className="main-view__skeleton-launcher">
+            <Skeleton3D store={this.props.store} config={skeleton3d} popupOnly />
+          </div>
+        )}
         <div className={cn("main-view").elem("annotation").toClassName()}>
           {fallback ?? (root && as.selected ? (
             <>
@@ -170,11 +174,6 @@ class App extends Component {
             </>
           ) : null)}
         </div>
-        {skeleton3d?.enabled && (
-          <div className="main-view__skeleton-panel">
-            <Skeleton3D store={this.props.store} config={skeleton3d} docked />
-          </div>
-        )}
       </div>
     );
   }
