@@ -316,7 +316,11 @@ export function SkeletonCanvas3D({
   const toggles = [["labels", "Labels"], ["cameras", "Cameras"], ["rays", "Rays"],
     ["shadow", "Shadow"], ["trail", "Trail"], ["path", "Path"], ["soles", "Soles"]];
   return (
-    <section style={{ display: "flex", flexDirection: "column", width: "100%", minWidth: 0, flex: detached ? "1 1 auto" : undefined, minHeight: 0 }}>
+    <section style={{
+      display: "flex", flexDirection: "column", width: "100%", minWidth: 0,
+      height: docked ? "100%" : undefined,
+      flex: detached ? "1 1 auto" : undefined, minHeight: 0,
+    }}>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 7, padding: "7px 4px", fontSize: 12, background: "#fff" }}>
         <label>Colour{" "}
           <select value={options.colour} onChange={(e) => setOptions((old) => ({ ...old, colour: e.target.value }))}>
@@ -382,8 +386,10 @@ export function SkeletonCanvas3D({
           if (event.key === "-") setView((old) => ({ ...old, zoom: Math.max(0.3, old.zoom / 1.2) }));
         }}
         style={{
-          width: "100%", height: detached ? "calc(100vh - 140px)" : docked ? "min(66vh, 740px)" : 400,
-          minHeight: detached ? 260 : docked ? 430 : 260,
+          width: "100%",
+          height: detached ? "calc(100vh - 140px)" : docked ? "100%" : 400,
+          minHeight: detached ? 260 : docked ? 180 : 260,
+          flex: docked ? "1 1 auto" : undefined,
           display: "block", touchAction: "none", cursor: "grab",
         }}
       />
