@@ -73,6 +73,9 @@ const hasTagInSidebar = (annotation) => {
  */
 class App extends Component {
   relationsRef = React.createRef();
+  skeleton3dRef = React.createRef();
+
+  onShow3D = () => this.skeleton3dRef.current?.show();
 
   componentDidMount() {
     // Hack to activate app hotkeys
@@ -276,13 +279,10 @@ class App extends Component {
               </InstructionsModal>
 
               {isDefined(store) && !store.isLoading && root && store.hasInterface("topbar") && <TopBar store={store} />}
-              {/* Keep the 3D portal outside annotation-dependent SideTabsPanels:
-                  that wrapper changes while loading the next task and must not
-                  destroy the popup or reset its live reconstruction state. */}
+              {/* The 3D viewer stays mounted here across frame changes, while
+                  its Show 3D button is rendered next to Submit/Update in BottomBar. */}
               {skeletonEnabled && (
-                <div className={cn("main-view").elem("skeleton-launcher").toClassName()}>
-                  <Skeleton3D store={store} config={getEnv(store).skeleton3d} popupOnly />
-                </div>
+                <Skeleton3D ref={this.skeleton3dRef} store={store} config={getEnv(store).skeleton3d} popupOnly />
               )}
               <div
                 className={cn("wrapper")
@@ -296,7 +296,7 @@ class App extends Component {
                 {isBulkMode || !store.hasInterface("side-column") || !as.selected ? (
                   <>
                     {mainContent}
-                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} />}
                   </>
                 ) : (
                   <SideTabsPanels
@@ -308,7 +308,7 @@ class App extends Component {
                     focusTab={store.commentStore.tooltipMessage ? "comments" : null}
                   >
                     {mainContent}
-                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} />}
                   </SideTabsPanels>
                 )}
               </div>
