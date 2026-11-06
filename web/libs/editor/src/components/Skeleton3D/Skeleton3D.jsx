@@ -124,10 +124,25 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
     popout.win.addEventListener("beforeunload", handleClosed);
     return () => popout.win.removeEventListener("beforeunload", handleClosed);
   }, [popout]);
-  useEffect(() => () => {
-    const win = popupWindow.current;
-    if (win && !win.closed) win.close();
-    popupWindow.current = null;
+  useEffect(() => {
+    const closeOnLeaveLabeling = () => {
+      // The Data Manager often switches to explorer without unmounting the
+      // editor. Close the detached popup explicitly on that mode transition,
+      // route exit, or browser-page unload. Task/frame changes never emit it.
+      const win = popupWindow.current;
+      popupWindow.current = null;
+      if (win && !win.closed) win.close();
+      setPopout(null);
+    };
+    window.addEventListener("labelstudio:leave-labeling", closeOnLeaveLabeling);
+    window.addEventListener("pagehide", closeOnLeaveLabeling);
+    return () => {
+      window.removeEventListener("labelstudio:leave-labeling", closeOnLeaveLabeling);
+      window.removeEventListener("pagehide", closeOnLeaveLabeling);
+      const win = popupWindow.current;
+      popupWindow.current = null;
+      if (win && !win.closed) win.close();
+    };
   }, []);
   // Snapshot the full calibration: changing it invalidates an in-flight response.
   const configKey = JSON.stringify(config);
