@@ -17,19 +17,35 @@
  * Label stream is not affected: the server picks the next task there.
  */
 import { imageCache } from "@humansignal/core";
-import { getPrefetchPolicy, limitPrefetchUrls } from "./prefetch-policy";
+
+const DEFAULTS = {
+  /** How many tasks after the current one to prefetch */
+  ahead: 3,
+  /** How many tasks before the current one to prefetch */
+  behind: 2,
+  /** Skip loading overlays when the target task is already prefetched */
+  instant: true,
+};
+
+const IMAGE_EXT_RE = /\.(jpe?g|png|gif|bmp|webp|tiff?|avif)$/i;
 
 /**
- * One next / one previous image by default, at most two speculative image
- * downloads per navigation. Each editor/tab applies these limits independently.
- * Task JSON prefetch is off by default to avoid stale shared-project annotations.
- * Local overrides are accepted, but clamped for multi-user safety.
+ * Read overrides from localStorage so behaviour can be tuned without rebuild:
+ *   localStorage.setItem("ls:prefetch", JSON.stringify({ ahead: 5, behind: 2, instant: true }))
+ * ahead = behind = 0 disables prefetching; instant = false keeps loading overlays.
  */
 const getSettings = () => {
   try {
-    return getPrefetchPolicy(window.localStorage?.getItem("ls:prefetch"));
+    const raw = window.localStorage?.getItem("ls:prefetch");
+    if (!raw) return DEFAULTS;
+    const parsed = JSON.parse(raw);
+    return {
+      ahead: Number.isFinite(parsed?.ahead) ? Math.max(0, parsed.ahead) : DEFAULTS.ahead,
+      behind: Number.isFinite(parsed?.behind) ? Math.max(0, parsed.behind) : DEFAULTS.behind,
+      instant: typeof parsed?.instant === "boolean" ? parsed.instant : DEFAULTS.instant,
+    };
   } catch {
-    return getPrefetchPolicy(null);
+    return DEFAULTS;
   }
 };
 
@@ -101,7 +117,7 @@ export const areTaskImagesReady = (task) => {
  * Keep a few decoded <img> elements alive, so the browser keeps the decoded
  * bitmap and showing the image in LSF does not pay for JPEG/PNG decoding.
  */
-const MAX_DECODED = 4;
+const MAX_DECODED = 8;
 const decodedImages = new Map(); // url -> HTMLImageElement
 
 const predecode = async (url, blobUrl) => {
@@ -129,7 +145,7 @@ const predecode = async (url, blobUrl) => {
  * (see `trackApiCall`), so a task is never shown with stale annotations
  * or drafts.
  */
-const TASK_DATA_TTL = 10 * 1000;
+const TASK_DATA_TTL = 60 * 1000;
 const taskDataCache = new Map(); // taskId -> { promise, data, timestamp }
 
 const taskKey = (taskID) => String(taskID);
@@ -350,13 +366,9 @@ export const prefetchNeighbourTasks = async (taskStore, currentTask) => {
   const neighbours = getNeighbourTasks(taskStore.list, currentTask.id, settings);
   const justLeft = neighbours.filter((task) => recentlyLeft.includes(task.id));
 
-  // Only image bytes are prefetched by default. Task JSON includes mutable
-  // annotations and drafts; it must be fetched fresh when colleagues may edit.
-  if (settings.taskData) {
-    neighbours.filter((task) => !justLeft.includes(task)).forEach((task) => prefetchData(taskStore, task.id));
-  }
+  neighbours.filter((task) => !justLeft.includes(task)).forEach((task) => prefetchData(taskStore, task.id));
 
-  if (settings.taskData && justLeft.length) {
+  if (justLeft.length) {
     // wait until saves of the left task have started (they begin right after the switch) and finished
     const sinceSwitch = Date.now() - lastSwitchAt;
     new Promise((resolve) => setTimeout(resolve, Math.max(0, LEAVE_SAVE_WINDOW - sinceSwitch)))
@@ -380,7 +392,7 @@ export const prefetchNeighbourTasks = async (taskStore, currentTask) => {
  * Stops as soon as another prefetch run starts (`generation` changes).
  */
 const prefetchImages = async (urls, myGeneration) => {
-  for (const url of limitPrefetchUrls(urls)) {
+  for (const url of [...new Set(urls)]) {
     if (myGeneration !== generation) return;
 
     try {
@@ -427,7 +439,7 @@ export const prefetchLabelStreamTasks = async (currentTask) => {
   if (settings.ahead === 0) return;
 
   const urls = [];
-  for (const task of labelStreamHint.slice(0, settings.ahead)) {
+  for (const task of labelStreamHint.slice(0, Math.max(settings.ahead, 1))) {
     if (currentTask && task.id === currentTask.id) continue;
     urls.push(...collectImageUrls(task.data));
   }
