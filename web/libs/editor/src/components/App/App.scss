@@ -165,54 +165,51 @@ body {
 :global(.ant-result-success .ant-result-icon>.anticon) {
   color: var(--color-positive-icon);
 }
-// Multi-camera mode: keep the native editable Label Studio image stage in the
-// right-hand pane. Only its container is resized; image/region coordinates,
-// Konva transforms, and save/undo behavior remain unchanged.
+// Keep 2D and 3D in two independent, height-constrained panes.
+// The 2D Konva stage must never resize just because the 3D result or
+// diagnostics change while a point is being dragged.
+.main-content {
+  min-height: 0;
+}
+
 .main-view--skeleton3d {
   display: grid;
-  grid-template-columns: minmax(310px, 44%) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(280px, 38%);
   align-items: stretch;
   min-width: 0;
   min-height: 0;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
   overflow: hidden;
   background: #e9edf4;
 
   > .main-view__annotation {
     min-width: 0;
     min-height: 0;
+    max-height: 100%;
     margin: 0;
-    padding: 12px;
+    padding: 8px;
     overflow: auto;
+    overscroll-behavior: contain;
     background: #f0f3f8;
-    border-left: 3px solid #273245;
+  }
+
+  > .main-view__skeleton-panel {
+    min-width: 0;
+    min-height: 0;
+    max-height: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-top: 3px solid #273245;
+    background: #f6f8fc;
   }
 }
 
-.main-view__skeleton-panel {
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  overflow: auto;
-  background: #f6f8fc;
-}
-
-@media (max-width: 950px) {
-  .main-view--skeleton3d {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(300px, 43vh) minmax(0, 1fr);
-
-    > .main-view__annotation {
-      border-left: 0;
-      border-top: 3px solid #273245;
-    }
-  }
-}
-
-// When 3D is detached, only the native 2D annotation editor remains in the
-// main window. The React portal continues rendering live into its own window.
+// The main window returns to one full-size 2D pane when the 3D is moved
+// into the secondary browser window. The React portal itself keeps updating.
 .main-view--skeleton3d.main-view--skeleton3d-detached {
-  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
 
   > .main-view__skeleton-panel {
@@ -220,7 +217,6 @@ body {
   }
 
   > .main-view__annotation {
-    border-left: 0;
-    min-width: 0;
+    border: 0;
   }
 }
