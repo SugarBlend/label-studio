@@ -147,29 +147,35 @@ class App extends Component {
     return <Result icon={<Spin size="large" />} />;
   }
 
-  _renderUI(root, as) {
-    if (as.viewingAll && getRoot(as).hasInterface("annotations:view-all")) {
+  _renderUI(root, as, fallback = null) {
+    const skeleton3d = getEnv(this.props.store).skeleton3d;
+
+    if (!skeleton3d?.enabled && as.viewingAll && getRoot(as).hasInterface("annotations:view-all")) {
       return this.renderAllAnnotations();
     }
 
-    const skeleton3d = getEnv(this.props.store).skeleton3d;
-
+    // The 3D component must live outside of the annotation's changing key:
+    // switching frames/annotations must not close its portal or reset its orbit.
+    // The parent grid remains mounted even when a reconstruction is pending.
     return (
       <div
-        key={(as.selectedHistory ?? as.selected)?.id}
         className={`${cn("main-view").toClassName()}${skeleton3d?.enabled ? " main-view--skeleton3d" : ""}`}
         onScrollCapture={this._notifyScroll}
       >
+        <div className={cn("main-view").elem("annotation").toClassName()}>
+          {fallback ?? (root && as.selected ? (
+            <>
+              <Annotation root={root} annotation={as.selected} />
+              {this.renderRelations(as.selected)}
+              {this.renderCommentsOverlay(as.selected)}
+            </>
+          ) : null)}
+        </div>
         {skeleton3d?.enabled && (
           <div className="main-view__skeleton-panel">
             <Skeleton3D store={this.props.store} config={skeleton3d} docked />
           </div>
         )}
-        <div className={cn("main-view").elem("annotation").toClassName()}>
-          {<Annotation root={root} annotation={as.selected} />}
-          {this.renderRelations(as.selected)}
-          {this.renderCommentsOverlay(as.selected)}
-        </div>
       </div>
     );
   }
@@ -227,28 +233,32 @@ class App extends Component {
     const root = as.selected && as.selected.root;
     const { settings } = store;
 
-    if (store.isLoading) return this.renderLoader();
-
-    if (store.noTask) return this.renderNothingToLabel(store);
-
-    if (store.noAccess) return this.renderNoAccess();
-
-    if (store.labeledSuccess) return this.renderSuccess();
-
-    if (!root) return this.renderNoAnnotation();
+    const skeletonEnabled = getEnv(store).skeleton3d?.enabled;
+    // In 3D mode we keep the same App subtree mounted during task/frame
+    // changes. In particular, do not replace it with a spinner when loading.
+    if (!skeletonEnabled) {
+      if (store.isLoading) return this.renderLoader();
+      if (store.noTask) return this.renderNothingToLabel(store);
+      if (store.noAccess) return this.renderNoAccess();
+      if (store.labeledSuccess) return this.renderSuccess();
+      if (!root) return this.renderNoAnnotation();
+    }
 
     const viewingAll = as.viewingAll;
-
-    // tags can be styled in config when user is awaiting for suggestions from ML backend
+    const fallback = store.isLoading ? this.renderLoader()
+      : store.noTask ? this.renderNothingToLabel(store)
+      : store.noAccess ? this.renderNoAccess()
+      : store.labeledSuccess ? this.renderSuccess()
+      : !root ? this.renderNoAnnotation()
+      : as.validation !== null ? this.renderConfigValidationException(store)
+      : null;
     const mainContent = (
       <div
         className={cn("main-content")
           .mix(...(store.awaitingSuggestions ? ["requesting"] : []))
           .toClassName()}
       >
-        {as.validation === null
-          ? this._renderUI(as.selectedHistory?.root ?? root, as)
-          : this.renderConfigValidationException(store)}
+        {this._renderUI(as.selectedHistory?.root ?? root, as, fallback)}
       </div>
     );
 
@@ -280,7 +290,7 @@ class App extends Component {
                   })
                   .toClassName()}
               >
-                {isBulkMode || !store.hasInterface("side-column") ? (
+                {isBulkMode || !store.hasInterface("side-column") || !as.selected ? (
                   <>
                     {mainContent}
                     {store.hasInterface("topbar") && <BottomBar store={store} />}
