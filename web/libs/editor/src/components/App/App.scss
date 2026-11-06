@@ -165,58 +165,61 @@ body {
 :global(.ant-result-success .ant-result-icon>.anticon) {
   color: var(--color-positive-icon);
 }
-// Keep 2D and 3D in two independent, height-constrained panes.
-// The 2D Konva stage must never resize just because the 3D result or
-// diagnostics change while a point is being dragged.
+// 3D is a separate browser window. Do not split the native 2D Konva stage
+// or reserve any vertical space for a hidden 3D canvas.
 .main-content {
   min-height: 0;
 }
 
 .main-view--skeleton3d {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) minmax(280px, 38%);
-  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
   min-width: 0;
   min-height: 0;
-  width: 100%;
   height: 100%;
-  max-height: 100%;
+  width: 100%;
   overflow: hidden;
-  background: #e9edf4;
+
+  > .main-view__skeleton-launcher {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--color-neutral-border);
+    background: var(--color-neutral-surface);
+  }
 
   > .main-view__annotation {
+    flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
-    max-height: 100%;
-    margin: 0;
-    padding: 8px;
     overflow: auto;
     overscroll-behavior: contain;
-    background: #f0f3f8;
+    padding: 8px 12px;
   }
 
-  > .main-view__skeleton-panel {
-    min-width: 0;
-    min-height: 0;
-    max-height: 100%;
-    height: 100%;
-    overflow: hidden;
-    border-top: 3px solid #273245;
-    background: #f6f8fc;
-  }
-}
+  .main-view__show-3d {
+    appearance: none;
+    border: 1px solid var(--color-primary-border, #8db9eb);
+    border-radius: 6px;
+    padding: 7px 14px;
+    color: var(--color-primary-content, #1d4ed8);
+    background: var(--color-primary-surface, #eff6ff);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    cursor: pointer;
 
-// The main window returns to one full-size 2D pane when the 3D is moved
-// into the secondary browser window. The React portal itself keeps updating.
-.main-view--skeleton3d.main-view--skeleton3d-detached {
-  grid-template-rows: minmax(0, 1fr);
+    &:hover {
+      background: var(--color-primary-surface-hover, #dbeafe);
+    }
 
-  > .main-view__skeleton-panel {
-    display: none;
-  }
-
-  > .main-view__annotation {
-    border: 0;
+    &:focus-visible {
+      outline: 2px solid var(--color-primary-border, #60a5fa);
+      outline-offset: 2px;
+    }
   }
 }
