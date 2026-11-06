@@ -37,8 +37,12 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
   const h = Math.max(1, bounds.height);
   // Use the destination window's DPI when the canvas is on another monitor.
   const dpr = Math.min(2, canvas.ownerDocument?.defaultView?.devicePixelRatio || 1);
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
+  // Updating these attributes clears the canvas; do it only when the actual
+  // pixel size changes, not on every reconstructed joint update.
+  const pixelWidth = Math.round(w * dpr);
+  const pixelHeight = Math.round(h * dpr);
+  if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+  if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
