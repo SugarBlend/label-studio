@@ -670,7 +670,6 @@ export class LSFWrapper {
     // if we have annotations created automatically, we don't need to create another one
     // automatically === created here and haven't saved yet, so they don't have pk
     // @todo because of some weird reason pk may be string uid, so check flags then
-    const hasAutoAnnotations = !!first && (!first.pk || (first.userGenerate && first.sentUserGenerate === false));
     const showPredictions = this.project.show_collab_predictions === true;
 
     if (this.labelStream) {
@@ -693,10 +692,13 @@ export class LSFWrapper {
       } else if (this.annotations.length === 0 && this.predictions.length > 0 && !this.isInteractivePreannotations) {
         const predictionByModelVersion = this.predictions.find((p) => p.createdBy === this.project.model_version);
         annotation = cs.addAnnotationFromPrediction(predictionByModelVersion ?? this.predictions[0]);
-      } else if (this.annotations.length > 0 && id && id !== "auto") {
-        annotation = this.annotations.find((c) => c.pk === id || c.id === id);
-      } else if (this.annotations.length > 0 && (id === "auto" || hasAutoAnnotations)) {
-        annotation = first;
+      } else if (this.annotations.length > 0) {
+        // In quick view, a missing annotation ID is not an instruction
+        // to create a blank annotation. Show existing work by default,
+        // or fall back to the first when the URL references an old version.
+        annotation = id && id !== "auto"
+          ? this.annotations.find((c) => c.pk === id || c.id === id) ?? first
+          : first;
       } else {
         annotation = cs.createAnnotation();
       }
