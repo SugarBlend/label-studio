@@ -14,6 +14,37 @@ test("four independent quadrant groups map percentages to calibration pixels", (
   assert.equal(result.error, null);
   assert.deepEqual(result.observations, [0, 1, 2, 3].map((slot) => ({ slot, joint: "l_big_toe", x: 320, y: 240 })));
 });
+test("each camera can be excluded from triangulation without modifying 2D annotations", () => {
+  const points = [
+    point("a", 25, 25, "person"),
+    point("b", 75, 25, "person"),
+    point("c", 25, 75, "person"),
+    point("d", 75, 75, "person"),
+  ];
+  const input = snapshot(points);
+  const original = JSON.stringify(input);
+  const all = adaptSkeleton(input, config);
+  const noTopRight = adaptSkeleton(input, config, [0, 2, 3]);
+  assert.deepEqual(all.observations.map((o) => o.slot), [0, 1, 2, 3]);
+  assert.deepEqual(noTopRight.observations.map((o) => o.slot), [0, 2, 3]);
+  assert.equal(noTopRight.error, null);
+  assert.equal(JSON.stringify(input), original);
+  const onlyPair = adaptSkeleton(input, config, [1, 3]);
+  assert.deepEqual(onlyPair.observations.map((o) => o.slot), [1, 3]);
+  assert.equal(onlyPair.error, null);
+  assert.match(adaptSkeleton(input, config, [2]).error, /at least two cameras/i);
+  assert.match(adaptSkeleton(input, config, []).error, /at least two cameras/i);
+  assert.deepEqual(adaptSkeleton(input, config, [0, 1, 2, 3]).observations, all.observations);
+});
+
+test("disabled camera annotations never block remaining valid cameras", () => {
+  const invalid = { ...point("bad", 75, 25), x: 130 };
+  const input = snapshot([point("a", 25, 25), invalid, point("c", 25, 75)]);
+  assert.match(adaptSkeleton(input, config).error, /invalid/);
+  const without = adaptSkeleton(input, config, [0, 2, 3]);
+  assert.equal(without.error, null);
+  assert.deepEqual(without.observations.map((o) => o.slot), [0, 2]);
+});
 test("rejects mixed people, multiple images and bad dimensions", () => {
   const a = point("a", 10, 20, "one");
   const b = { ...point("b", 20, 30, "two"), labels: ["l_heel"] };
