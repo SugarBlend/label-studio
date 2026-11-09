@@ -1434,7 +1434,7 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
   return (
     <>
       <ImageLayer item={item} />
-      {getEnv(store).skeleton3d?.enabled && <CameraMosaicOverlay item={item} />}
+      {getEnv(store).skeleton3d?.enabled && <CameraMosaicOverlay item={item} cameras={getEnv(store).skeleton3d?.cameras} />}
       {item.grid && item.sizeUpdated && <ImageGrid item={item} />}
 
       {isFF(FF_LSDV_4930) ? <TransformerBack item={item} /> : null}
