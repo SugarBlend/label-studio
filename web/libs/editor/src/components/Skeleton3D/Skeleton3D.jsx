@@ -61,6 +61,10 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
   const [selectedJoint, setSelectedJoint] = useState(null);
   const [sourceId, setSourceId] = useState("auto");
   const [availableSources, setAvailableSources] = useState([]);
+  // Local to this open 3D viewer; camera selection is not saved in project
+  // calibration or 2D annotations, and survives navigation between frames.
+  const [enabledCameraSlots, setEnabledCameraSlots] = useState([0, 1, 2, 3]);
+  const enabledCameraKey = enabledCameraSlots.join(",");
   const currentTaskRef = useRef(null);
   useEffect(() => {
     try { window.localStorage.setItem("ls.skeleton3d.camera", JSON.stringify(sceneView)); }
@@ -176,7 +180,13 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
         // Preserve the last scene while the new frame is loading, but make
         // the transition visible: the old pose is only a placeholder until the
         // new result arrives. Never label it as the current reconstruction.
-        setState((previous) => mergeFrameState(previous, next));
+        // Don't keep an unrelated previous pose when fewer than two cameras
+        // are enabled: there is no current triangulation to display.
+        if (next.status === "invalid" && next.error?.startsWith("Select at least two cameras")) {
+          setState({ ...next, stale: false });
+        } else {
+          setState((previous) => mergeFrameState(previous, next));
+        }
       },
     });
     const dispose = reaction(
@@ -198,7 +208,7 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
           }));
         }
         runner.update({
-          ...adaptSkeleton(current, settings),
+          ...adaptSkeleton(current, settings, enabledCameraSlots),
           config: settings,
           task: current.task,
           annotation: current.annotation,
@@ -207,7 +217,7 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
       { fireImmediately: true },
     );
     return () => { dispose(); runner.dispose(); };
-  }, [store, configKey, sourceId, popupOnly, Boolean(popout)]);
+  }, [store, configKey, sourceId, popupOnly, Boolean(popout), enabledCameraKey]);
   useEffect(() => {
     try { window.localStorage.setItem(PANEL_KEY, JSON.stringify(panel)); } catch (error) { /* private mode */ }
   }, [panel]);
@@ -323,6 +333,44 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
               {state.error ? ` · ${state.error}` : ""}
               {state.stale && " · Previous pose remains visible until the current frame is ready."}
             </div>
+          <fieldset style={{
+            margin: "0 0 10px", border: "1px solid #dbe3ef", borderRadius: 6,
+            padding: "7px 9px", minWidth: 0,
+          }}>
+            <legend style={{ padding: "0 5px", fontWeight: 650 }}>Cameras used for triangulation</legend>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "7px 14px", alignItems: "center" }}>
+              {(config?.cameras ?? []).slice().sort((a, b) => a.slot - b.slot).map((camera) => (
+                <label key={camera.slot} style={{
+                  display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer",
+                  opacity: enabledCameraSlots.includes(camera.slot) ? 1 : 0.6,
+                }}>
+                  <input type="checkbox"
+                    checked={enabledCameraSlots.includes(camera.slot)}
+                    aria-label={`Include ${camera.name || `camera_${camera.slot}`} in 3D triangulation`}
+                    onChange={(event) => {
+                      const slot = camera.slot;
+                      setEnabledCameraSlots((previous) =>
+                        event.target.checked
+                          ? [...previous, slot].sort((a, b) => a - b)
+                          : previous.filter((value) => value !== slot));
+                    }}
+                  />
+                  {camera.name || `camera_${camera.slot}`}
+                  <span style={{ color: "#64748b" }}>(slot {camera.slot})</span>
+                </label>
+              ))}
+              <button type="button" onClick={() => setEnabledCameraSlots([0, 1, 2, 3])}
+                style={{ border: "1px solid #cbd5e1", borderRadius: 5, background: "#f8fafc",
+                  padding: "4px 9px", fontSize: 11 }}>
+                All cameras
+              </button>
+            </div>
+            {enabledCameraSlots.length < 2 && (
+              <div role="alert" style={{ marginTop: 6, color: "#b91c1c" }}>
+                Enable at least two cameras to reconstruct 3D points.
+              </div>
+            )}
+          </fieldset>
           {availableSources.length > 0 && (
             <label style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, paddingBottom: 7 }}>
               <strong>3D source</strong>
