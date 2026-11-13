@@ -1074,7 +1074,7 @@ export default observer(
                   prev: "image:prev",
                   next: "image:next",
                 }}
-                currentPage={item.currentImage + 1}
+                currentPage={(item.pendingImageIndex ?? item.currentImage) + 1}
                 totalPages={item.parsedValueList.length}
                 onChange={(n) => item.setCurrentImage(n - 1)}
                 pageSizeSelectable={false}
@@ -1173,7 +1173,7 @@ export default observer(
                   alt=""
                   key={src}
                   src={src}
-                  className={i === item.currentImage && styles.active}
+                  className={i === (item.pendingImageIndex ?? item.currentImage) && styles.active}
                   height="60"
                   onClick={() => item.setCurrentImage(i)}
                 />
@@ -1228,6 +1228,7 @@ const EntireStage = observer(
           item.setStageRef(ref);
         }}
         className={[styles["image-element"], ...imagePositionClassnames].join(" ")}
+        style={item.pendingImageIndex !== null ? { pointerEvents: "none" } : undefined}
         width={size.width}
         height={size.height}
         scaleX={item.zoomScale}
@@ -1263,7 +1264,8 @@ const ImageLayer = observer(({ item }) => {
   const domImage = item.imageRef;
   const readyDomImage =
     domImage?.complete && domImage.naturalWidth > 0 && currentSrc && domImage.src === currentSrc ? domImage : null;
-  const image = readyDomImage ?? loadedImage;
+  const decodedImage = imageEntity?.decodedImage?.src === currentSrc ? imageEntity.decodedImage : null;
+  const image = readyDomImage ?? decodedImage ?? (loadedImage?.src === currentSrc ? loadedImage : null);
 
   useEffect(() => {
     if (!imageEntity?.downloaded || !currentSrc) {
@@ -1271,7 +1273,7 @@ const ImageLayer = observer(({ item }) => {
       return;
     }
 
-    if (readyDomImage) return;
+    if (readyDomImage || decodedImage) return;
 
     let cancelled = false;
     const img = new window.Image();
@@ -1289,7 +1291,7 @@ const ImageLayer = observer(({ item }) => {
     return () => {
       cancelled = true;
     };
-  }, [imageEntity?.downloaded, currentSrc, item.imageCrossOrigin, readyDomImage]);
+  }, [imageEntity?.downloaded, currentSrc, item.imageCrossOrigin, readyDomImage, decodedImage]);
 
   const { width, height } = useMemo(() => {
     return {
