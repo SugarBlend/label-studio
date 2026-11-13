@@ -857,6 +857,7 @@ const Model = types
         // Clicking the visible page also cancels an outstanding navigation.
         self.imageSwitchRequest += 1;
         self.pendingImageIndex = null;
+        self.clearFrameTransitionOverlay();
         return;
       }
 
@@ -917,7 +918,9 @@ const Model = types
     cancelPreparedImage(request, error) {
       if (request !== self.imageSwitchRequest) return;
       self.pendingImageIndex = null;
-      // Keep the previous image and its annotations visible on failure too.
+      // Restore the currently rendered frame if a subsequent navigation
+      // failed while the visual snapshot from an earlier switch was active.
+      self.clearFrameTransitionOverlay();
       console.error("Unable to prepare the requested frame", error);
     },
 
