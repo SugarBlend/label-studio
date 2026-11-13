@@ -43,6 +43,56 @@ const MAX_ZOOM = 100;
 const MAX_ZOOM_CHANGE_PER_EVENT = 0.3; // Maximum zoom change per wheel event (30%)
 
 /**
+ * Preserve exactly what the user sees (photo, keypoints, bones and camera
+ * labels) while React and Konva replace the current frame. The snapshot is
+ * visual only and is never used for editing or serializing annotations.
+ * Keep it outside the resizing viewer so a changed aspect ratio cannot clip
+ * or move the old frame during the transition.
+ */
+function freezeRenderedFrame(stage, container) {
+  if (!stage?.container() || !container || typeof document === "undefined") return null;
+
+  try {
+    const frame = container.getBoundingClientRect();
+    const stageRect = stage.container().getBoundingClientRect();
+    if (!frame.width || !frame.height || !stageRect.width || !stageRect.height) return null;
+
+    const snapshot = stage.toCanvas({ pixelRatio: Math.min(window.devicePixelRatio || 1, 2) });
+    if (!snapshot?.width || !snapshot?.height) return null;
+
+    const cover = document.createElement("div");
+    cover.setAttribute("aria-hidden", "true");
+    Object.assign(cover.style, {
+      position: "fixed",
+      top: `${frame.top}px`,
+      left: `${frame.left}px`,
+      width: `${frame.width}px`,
+      height: `${frame.height}px`,
+      overflow: "hidden",
+      pointerEvents: "none",
+      background: "white",
+      zIndex: "2147483000",
+    });
+    Object.assign(snapshot.style, {
+      position: "absolute",
+      top: `${stageRect.top - frame.top}px`,
+      left: `${stageRect.left - frame.left}px`,
+      width: `${stageRect.width}px`,
+      height: `${stageRect.height}px`,
+      pointerEvents: "none",
+    });
+    cover.appendChild(snapshot);
+    document.body.appendChild(cover);
+    return cover;
+  } catch (error) {
+    // Some browsers cannot copy a canvas that contains cross-origin pixels.
+    // Frame navigation still works; the snapshot is best-effort in that case.
+    console.warn("Could not retain the previous 2D frame", error);
+    return null;
+  }
+}
+
+/**
  * The `Image` tag shows an image on the page. Use for all image annotation tasks to display an image on the labeling interface.
  *
  * Use with the following data types: images.
@@ -198,6 +248,8 @@ const Model = types
     /** Requested image stays separate from the displayed image until decoding finishes. */
     pendingImageIndex: null,
     imageSwitchRequest: 0,
+    /** DOM-only snapshot, never part of the annotation state or history. */
+    frameTransitionOverlay: null,
     supportSuggestions: true,
     /** Filler element that defines the container height (see ImageView) */
     fillerRef: null,
@@ -835,6 +887,13 @@ const Model = types
       const next = self.findImageEntity(index);
       if (!next || !image?.naturalWidth || !image?.naturalHeight || next.currentSrc !== image.src) return;
 
+      // Snapshot BEFORE changing currentImage, while every canvas layer still
+      // belongs to the previous frame. A rapid second switch reuses the
+      // already-visible snapshot rather than capturing a half-painted frame.
+      if (!self.frameTransitionOverlay) {
+        self.frameTransitionOverlay = freezeRenderedFrame(self.stageRef, self.containerRef);
+      }
+
       const previous = self.currentImageEntity;
       next.setNaturalWidth(image.naturalWidth);
       next.setNaturalHeight(image.naturalHeight);
@@ -860,6 +919,11 @@ const Model = types
       self.pendingImageIndex = null;
       // Keep the previous image and its annotations visible on failure too.
       console.error("Unable to prepare the requested frame", error);
+    },
+
+    clearFrameTransitionOverlay() {
+      self.frameTransitionOverlay?.remove();
+      self.frameTransitionOverlay = null;
     },
 
     preloadImages() {
