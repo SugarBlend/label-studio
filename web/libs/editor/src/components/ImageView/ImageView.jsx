@@ -528,6 +528,9 @@ export default observer(
     skipNextMouseDown = false;
     skipNextClick = false;
     skipNextMouseUp = false;
+    transitionReleaseFrame = null;
+    transitionReleaseNextFrame = null;
+    transitionReleaseRequest = null;
     mouseDownPoint = null;
     mouseDown = false;
 
@@ -989,21 +992,62 @@ export default observer(
     componentWillUnmount() {
       this.detachObserver();
       window.removeEventListener("resize", this.onResize);
-
+      this.cancelTransitionRelease();
+      const { item } = this.props;
+      if (item && isAlive(item)) item.clearFrameTransitionOverlay();
       hotkeys.removeDescription("shift");
     }
 
     componentDidUpdate() {
       this.onResize();
       this.updateReadyStatus();
+      this.releaseSnapshotAfterNewFramePaint();
     }
+
+    cancelTransitionRelease = () => {
+      if (this.transitionReleaseFrame !== null) cancelAnimationFrame(this.transitionReleaseFrame);
+      if (this.transitionReleaseNextFrame !== null) cancelAnimationFrame(this.transitionReleaseNextFrame);
+      this.transitionReleaseFrame = null;
+      this.transitionReleaseNextFrame = null;
+      this.transitionReleaseRequest = null;
+    };
+
+    releaseSnapshotAfterNewFramePaint = () => {
+      const { item } = this.props;
+      if (!isAlive(item) || !item.frameTransitionOverlay || !item.imageIsLoaded || !item.stageRef) return;
+      const request = item.imageSwitchRequest;
+      if (request === this.transitionReleaseRequest) return;
+      this.cancelTransitionRelease();
+      this.transitionReleaseRequest = request;
+      const snapshot = item.frameTransitionOverlay;
+
+      // React has committed the new image and regions by componentDidUpdate,
+      // but Konva may still have a queued batchDraw. Draw the complete stage
+      // first, then remove the frozen previous frame on the following paint.
+      this.transitionReleaseFrame = requestAnimationFrame(() => {
+        if (!isAlive(item) || item.imageSwitchRequest !== request || item.frameTransitionOverlay !== snapshot) return;
+        item.stageRef?.draw();
+        this.transitionReleaseNextFrame = requestAnimationFrame(() => {
+          if (isAlive(item) && item.imageSwitchRequest === request && item.frameTransitionOverlay === snapshot) {
+            item.clearFrameTransitionOverlay();
+          }
+          this.transitionReleaseFrame = null;
+          this.transitionReleaseNextFrame = null;
+          this.transitionReleaseRequest = null;
+        });
+      });
+    };
 
     updateReadyStatus() {
       const { item } = this.props;
       const { imageRef } = this;
 
-      if (!item || !isAlive(item) || !imageRef.current) return;
-      if (item.isReady !== imageRef.current.complete) item.setReady(imageRef.current.complete);
+      if (!item || !isAlive(item)) return;
+      // The hidden DOM image may still be changing src even though the next
+      // frame is already decoded and ready to be drawn by Konva.
+      const ready = item.imageIsLoaded ||
+        !!(imageRef.current?.complete && imageRef.current.naturalWidth > 0);
+      if (item.isReady !== ready) item.setReady(ready);
     }
 
     renderTools() {
@@ -1325,7 +1369,6 @@ const ImageLayer = observer(({ item }) => {
   return image ? (
     <Layer imageSmoothingEnabled={item.smoothingEnabled} scale={{ x: item.stageZoom, y: item.stageZoom }}>
       <KonvaImage
-        key={currentSrc ?? "image-source"}
         ref={konvaImageRef}
         image={image}
         width={width}
