@@ -1,6 +1,6 @@
 import { ff } from "@humansignal/core";
 import { inject } from "mobx-react";
-import { destroy, getRoot, getType, types } from "mobx-state-tree";
+import { destroy, getRoot, getType, isAlive, types } from "mobx-state-tree";
 
 import ImageView from "../../../components/ImageView/ImageView";
 import { customTypes } from "../../../core/CustomTypes";
@@ -195,6 +195,9 @@ const Model = types
   })
   .volatile(() => ({
     currentImage: undefined,
+    /** Requested image stays separate from the displayed image until decoding finishes. */
+    pendingImageIndex: null,
+    imageSwitchRequest: 0,
     supportSuggestions: true,
     /** Filler element that defines the container height (see ImageView) */
     fillerRef: null,
@@ -796,21 +799,76 @@ const Model = types
 
     setCurrentImage(index = 0) {
       index = index ?? 0;
-      if (index === self.currentImage) return;
+      const next = self.findImageEntity(index);
+      if (!next) return;
+      if (index === self.currentImage) {
+        // Clicking the visible page also cancels an outstanding navigation.
+        self.imageSwitchRequest += 1;
+        self.pendingImageIndex = null;
+        return;
+      }
 
+      const request = ++self.imageSwitchRequest;
+      if (self.currentImage === undefined || !self.multiImage) {
+        // Initial mounting must remain synchronous.
+        self.currentImage = index;
+        self.currentImageEntity = next;
+        self.preloadImages();
+        return;
+      }
+
+      // Do NOT change currentImage/currentImageEntity here: both the previous
+      // frame and its annotations must remain visible throughout the download.
+      self.pendingImageIndex = index;
+      next.prepareForDisplay().then(
+        (image) => {
+          if (isAlive(self)) self.commitPreparedImage(index, request, image);
+        },
+        (error) => {
+          if (isAlive(self)) self.cancelPreparedImage(request, error);
+        },
+      );
+    },
+
+    commitPreparedImage(index, request, image) {
+      if (request !== self.imageSwitchRequest) return;
+      const next = self.findImageEntity(index);
+      if (!next || !image?.naturalWidth || !image?.naturalHeight || next.currentSrc !== image.src) return;
+
+      const previous = self.currentImageEntity;
+      next.setNaturalWidth(image.naturalWidth);
+      next.setNaturalHeight(image.naturalHeight);
+      next.setDecodedImage(image);
+      next.setImageLoaded(true);
+
+      // MobX batches all changes in this action into a single React update.
       self.currentImage = index;
-      self.currentImageEntity = self.findImageEntity(index);
+      self.currentImageEntity = next;
+      self.pendingImageIndex = null;
+
+      if (self.containerRef) {
+        // Prepare image geometry and region positions BEFORE React renders
+        // the new page. The hidden <img> still belongs to the previous page.
+        self.updateImageSize(null, image);
+      }
       self.preloadImages();
+      if (previous && previous !== next) previous.setDecodedImage(null);
+    },
+
+    cancelPreparedImage(request, error) {
+      if (request !== self.imageSwitchRequest) return;
+      self.pendingImageIndex = null;
+      // Keep the previous image and its annotations visible on failure too.
+      console.error("Unable to prepare the requested frame", error);
     },
 
     preloadImages() {
-      self.currentImageEntity.setImageLoaded(false);
-      self.currentImageEntity.preload();
+      if (!self.currentImageEntity.imageLoaded) self.currentImageEntity.preload();
 
       if (self.multiImage) {
         const [currentIndex, length] = [self.currentImage, self.imageEntities.length];
         const prevSliceIndex = clamp(currentIndex - IMAGE_PRELOAD_COUNT, 0, currentIndex);
-        const nextSliceIndex = clamp(currentIndex + 1 + IMAGE_PRELOAD_COUNT, currentIndex, length - 1);
+        const nextSliceIndex = clamp(currentIndex + 1 + IMAGE_PRELOAD_COUNT, currentIndex, length);
 
         const images = [
           ...self.imageEntities.slice(prevSliceIndex, currentIndex),
@@ -1232,8 +1290,19 @@ const Model = types
       }
     },
 
-    updateImageSize(ev) {
-      const { naturalWidth, naturalHeight } = self.imageRef ?? ev.target;
+    updateImageSize(ev, preparedImage = null) {
+      const source = preparedImage ?? self.imageRef ?? ev?.target;
+      if (!source) return;
+      const { naturalWidth, naturalHeight } = source;
+
+      // The prepared frame has already been laid out before it became visible.
+      // Its hidden DOM <img> will still fire onLoad, but must not reset zoom,
+      // redraw regions or reinitialize annotation history for a second time.
+      if (!preparedImage && self.imageIsLoaded && self.sizeUpdated &&
+          self.naturalWidth === naturalWidth && self.naturalHeight === naturalHeight) {
+        self.setReady(true);
+        return;
+      }
 
       self.naturalWidth = naturalWidth;
       self.naturalHeight = naturalHeight;
