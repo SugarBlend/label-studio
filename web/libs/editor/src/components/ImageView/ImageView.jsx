@@ -528,6 +528,9 @@ export default observer(
     skipNextMouseDown = false;
     skipNextClick = false;
     skipNextMouseUp = false;
+    transitionReleaseFrame = null;
+    transitionReleaseNextFrame = null;
+    transitionReleaseRequest = null;
     mouseDownPoint = null;
     mouseDown = false;
 
@@ -989,21 +992,62 @@ export default observer(
     componentWillUnmount() {
       this.detachObserver();
       window.removeEventListener("resize", this.onResize);
-
+      this.cancelTransitionRelease();
+      const { item } = this.props;
+      if (item && isAlive(item)) item.clearFrameTransitionOverlay();
       hotkeys.removeDescription("shift");
     }
 
     componentDidUpdate() {
       this.onResize();
       this.updateReadyStatus();
+      this.releaseSnapshotAfterNewFramePaint();
     }
+
+    cancelTransitionRelease = () => {
+      if (this.transitionReleaseFrame !== null) cancelAnimationFrame(this.transitionReleaseFrame);
+      if (this.transitionReleaseNextFrame !== null) cancelAnimationFrame(this.transitionReleaseNextFrame);
+      this.transitionReleaseFrame = null;
+      this.transitionReleaseNextFrame = null;
+      this.transitionReleaseRequest = null;
+    };
+
+    releaseSnapshotAfterNewFramePaint = () => {
+      const { item } = this.props;
+      if (!isAlive(item) || !item.frameTransitionOverlay || !item.imageIsLoaded || !item.stageRef) return;
+      const request = item.imageSwitchRequest;
+      if (request === this.transitionReleaseRequest) return;
+      this.cancelTransitionRelease();
+      this.transitionReleaseRequest = request;
+      const snapshot = item.frameTransitionOverlay;
+
+      // React has committed the new image and regions by componentDidUpdate,
+      // but Konva may still have a queued batchDraw. Draw the complete stage
+      // first, then remove the frozen previous frame on the following paint.
+      this.transitionReleaseFrame = requestAnimationFrame(() => {
+        if (!isAlive(item) || item.imageSwitchRequest !== request || item.frameTransitionOverlay !== snapshot) return;
+        item.stageRef?.draw();
+        this.transitionReleaseNextFrame = requestAnimationFrame(() => {
+          if (isAlive(item) && item.imageSwitchRequest === request && item.frameTransitionOverlay === snapshot) {
+            item.clearFrameTransitionOverlay();
+          }
+          this.transitionReleaseFrame = null;
+          this.transitionReleaseNextFrame = null;
+          this.transitionReleaseRequest = null;
+        });
+      });
+    };
 
     updateReadyStatus() {
       const { item } = this.props;
       const { imageRef } = this;
 
-      if (!item || !isAlive(item) || !imageRef.current) return;
-      if (item.isReady !== imageRef.current.complete) item.setReady(imageRef.current.complete);
+      if (!item || !isAlive(item)) return;
+      // The hidden DOM image may still be changing src even though the next
+      // frame is already decoded and ready to be drawn by Konva.
+      const ready = item.imageIsLoaded ||
+        !!(imageRef.current?.complete && imageRef.current.naturalWidth > 0);
+      if (item.isReady !== ready) item.setReady(ready);
     }
 
     renderTools() {
@@ -1074,7 +1118,7 @@ export default observer(
                   prev: "image:prev",
                   next: "image:next",
                 }}
-                currentPage={item.currentImage + 1}
+                currentPage={(item.pendingImageIndex ?? item.currentImage) + 1}
                 totalPages={item.parsedValueList.length}
                 onChange={(n) => item.setCurrentImage(n - 1)}
                 pageSizeSelectable={false}
@@ -1173,7 +1217,7 @@ export default observer(
                   alt=""
                   key={src}
                   src={src}
-                  className={i === item.currentImage && styles.active}
+                  className={i === (item.pendingImageIndex ?? item.currentImage) && styles.active}
                   height="60"
                   onClick={() => item.setCurrentImage(i)}
                 />
@@ -1228,6 +1272,7 @@ const EntireStage = observer(
           item.setStageRef(ref);
         }}
         className={[styles["image-element"], ...imagePositionClassnames].join(" ")}
+        style={item.pendingImageIndex !== null ? { pointerEvents: "none" } : undefined}
         width={size.width}
         height={size.height}
         scaleX={item.zoomScale}
@@ -1263,7 +1308,8 @@ const ImageLayer = observer(({ item }) => {
   const domImage = item.imageRef;
   const readyDomImage =
     domImage?.complete && domImage.naturalWidth > 0 && currentSrc && domImage.src === currentSrc ? domImage : null;
-  const image = readyDomImage ?? loadedImage;
+  const decodedImage = imageEntity?.decodedImage?.src === currentSrc ? imageEntity.decodedImage : null;
+  const image = readyDomImage ?? decodedImage ?? (loadedImage?.src === currentSrc ? loadedImage : null);
 
   useEffect(() => {
     if (!imageEntity?.downloaded || !currentSrc) {
@@ -1271,7 +1317,7 @@ const ImageLayer = observer(({ item }) => {
       return;
     }
 
-    if (readyDomImage) return;
+    if (readyDomImage || decodedImage) return;
 
     let cancelled = false;
     const img = new window.Image();
@@ -1289,7 +1335,7 @@ const ImageLayer = observer(({ item }) => {
     return () => {
       cancelled = true;
     };
-  }, [imageEntity?.downloaded, currentSrc, item.imageCrossOrigin, readyDomImage]);
+  }, [imageEntity?.downloaded, currentSrc, item.imageCrossOrigin, readyDomImage, decodedImage]);
 
   const { width, height } = useMemo(() => {
     return {
@@ -1323,7 +1369,6 @@ const ImageLayer = observer(({ item }) => {
   return image ? (
     <Layer imageSmoothingEnabled={item.smoothingEnabled} scale={{ x: item.stageZoom, y: item.stageZoom }}>
       <KonvaImage
-        key={currentSrc ?? "image-source"}
         ref={konvaImageRef}
         image={image}
         width={width}
@@ -1434,7 +1479,7 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
   return (
     <>
       <ImageLayer item={item} />
-      {getEnv(store).skeleton3d?.enabled && <CameraMosaicOverlay item={item} />}
+      {getEnv(store).skeleton3d?.enabled && <CameraMosaicOverlay item={item} cameras={getEnv(store).skeleton3d?.cameras} />}
       {item.grid && item.sizeUpdated && <ImageGrid item={item} />}
 
       {isFF(FF_LSDV_4930) ? <TransformerBack item={item} /> : null}

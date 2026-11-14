@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { reaction } from "mobx";
-import { adaptSkeleton, createReconstructionRunner, readSkeletonSnapshot } from "./adapter";
+import { adaptSkeleton, createFrameCache, createReconstructionRunner, readSkeletonSnapshot } from "./adapter";
 import { requestReconstruction } from "./request";
 import { SkeletonCanvas3D } from "./SkeletonCanvas3D";
+import { mergeFrameState } from "./frameState";
+import { getReprojectionWarnings } from "./reprojectionQuality";
 import { cn } from "../../utils/bem";
 
 const formatAngle = (value) => (Number.isFinite(value) ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)}°` : "n/a");
@@ -22,11 +24,13 @@ const readPanelState = () => {
 };
 
 /** Floating read-only window: the 3D view stays visible next to the mosaic while labelling. */
-export function Skeleton3D({ store, config, docked = false, popupOnly = false }) {
+export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, docked = false, popupOnly = false }, ref) {
   const [state, setState] = useState({ status: "pending", data: null });
   // Temporary in-memory reconstruction history for the Trail / Path toggles.
   // No points or trajectories are saved into the Label Studio annotations.
   const history = useRef([]);
+  // Per-editor, per-browser-tab LRU. No backend/shared cache or task prefetch.
+  const frameCache = useRef(createFrameCache(8));
   const [panel, setPanel] = useState(readPanelState);
   const box = useRef(null);
   const moving = useRef(null);
@@ -57,6 +61,10 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
   const [selectedJoint, setSelectedJoint] = useState(null);
   const [sourceId, setSourceId] = useState("auto");
   const [availableSources, setAvailableSources] = useState([]);
+  // Local to this open 3D viewer; camera selection is not saved in project
+  // calibration or 2D annotations, and survives navigation between frames.
+  const [enabledCameraSlots, setEnabledCameraSlots] = useState([0, 1, 2, 3]);
+  const enabledCameraKey = enabledCameraSlots.join(",");
   const currentTaskRef = useRef(null);
   useEffect(() => {
     try { window.localStorage.setItem("ls.skeleton3d.camera", JSON.stringify(sceneView)); }
@@ -92,6 +100,11 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
     setPopout({ win, root });
     win.focus();
   };
+  // Expose the same popup action to the Submit/Update toolbar without moving
+  // this component into the task-dependent BottomBar subtree. The popup and
+  // live frame cache must survive BottomBar remounts during navigation.
+  React.useImperativeHandle(ref, () => ({ show: openPopout }));
+
   const attachPopout = () => {
     const win = popupWindow.current;
     popupWindow.current = null;
@@ -116,10 +129,25 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
     popout.win.addEventListener("beforeunload", handleClosed);
     return () => popout.win.removeEventListener("beforeunload", handleClosed);
   }, [popout]);
-  useEffect(() => () => {
-    const win = popupWindow.current;
-    if (win && !win.closed) win.close();
-    popupWindow.current = null;
+  useEffect(() => {
+    const closeOnLeaveLabeling = () => {
+      // The Data Manager often switches to explorer without unmounting the
+      // editor. Close the detached popup explicitly on that mode transition,
+      // route exit, or browser-page unload. Task/frame changes never emit it.
+      const win = popupWindow.current;
+      popupWindow.current = null;
+      if (win && !win.closed) win.close();
+      setPopout(null);
+    };
+    window.addEventListener("labelstudio:leave-labeling", closeOnLeaveLabeling);
+    window.addEventListener("pagehide", closeOnLeaveLabeling);
+    return () => {
+      window.removeEventListener("labelstudio:leave-labeling", closeOnLeaveLabeling);
+      window.removeEventListener("pagehide", closeOnLeaveLabeling);
+      const win = popupWindow.current;
+      popupWindow.current = null;
+      if (win && !win.closed) win.close();
+    };
   }, []);
   // Snapshot the full calibration: changing it invalidates an in-flight response.
   const configKey = JSON.stringify(config);
@@ -130,6 +158,14 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
     const settings = JSON.parse(configKey);
     const runner = createReconstructionRunner({
       request: requestReconstruction,
+      cache: frameCache.current,
+      // Faster frame navigation, while coalescing frequent 2D drags and
+      // capping how often this browser starts a server reconstruction.
+      fastDelay: 35,
+      delay: 280,
+      // At most ~4 requests/sec per active editor even during rapid input.
+      // Each user's own session limits its requests; no global shared cache.
+      minInterval: 250,
       onState: (next) => {
         if (next.status === "ready" && Array.isArray(next.data?.joints)) {
           const accepted = next.data.joints.filter((j) =>
@@ -141,11 +177,16 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
             if (JSON.stringify(frame) !== JSON.stringify(last)) history.current = [...history.current, frame].slice(-90);
           }
         }
-        // Keep the last good 3D pose on screen during the debounce/request:
-        // otherwise dragging one 2D point unmounts the 3D canvas on every tick.
-        setState((previous) => next.status === "pending" && previous.data
-          ? { ...next, data: previous.data }
-          : next);
+        // Preserve the last scene while the new frame is loading, but make
+        // the transition visible: the old pose is only a placeholder until the
+        // new result arrives. Never label it as the current reconstruction.
+        // Don't keep an unrelated previous pose when fewer than two cameras
+        // are enabled: there is no current triangulation to display.
+        if (next.status === "invalid" && next.error?.startsWith("Select at least two cameras")) {
+          setState({ ...next, stale: false });
+        } else {
+          setState((previous) => mergeFrameState(previous, next));
+        }
       },
     });
     const dispose = reaction(
@@ -159,14 +200,24 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
           history.current = [];
           setSelectedJoint(null);
           setSourceId("auto");
-          setState({ status: "pending", data: null, error: null, notes: [] });
+          // Keep the previously rendered geometry until this frame's
+          // reconstruction is ready. The pending state explicitly marks it stale.
+          setState((previous) => ({
+            status: "pending", data: previous.data, error: null,
+            notes: [], stale: Boolean(previous.data),
+          }));
         }
-        runner.update({ ...adaptSkeleton(current, settings), config: settings });
+        runner.update({
+          ...adaptSkeleton(current, settings, enabledCameraSlots),
+          config: settings,
+          task: current.task,
+          annotation: current.annotation,
+        });
       },
       { fireImmediately: true },
     );
     return () => { dispose(); runner.dispose(); };
-  }, [store, configKey, sourceId, popupOnly, Boolean(popout)]);
+  }, [store, configKey, sourceId, popupOnly, Boolean(popout), enabledCameraKey]);
   useEffect(() => {
     try { window.localStorage.setItem(PANEL_KEY, JSON.stringify(panel)); } catch (error) { /* private mode */ }
   }, [panel]);
@@ -188,28 +239,19 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
   }, []);
 
   const data = state.data;
-  const rejectedByQuality = (data?.joints ?? []).filter((joint) =>
-    Number.isFinite(joint.rms_reprojection_error_px) && joint.rms_reprojection_error_px > 10);
-  const goodJoints = (data?.joints ?? []).filter((joint) =>
-    Number.isFinite(joint.rms_reprojection_error_px) && joint.rms_reprojection_error_px <= 10);
-  // Suppress a globally wrong pose rather than presenting impossible bone lengths.
-  const unreliable = !!data?.joints?.length && rejectedByQuality.length >= Math.ceil(data.joints.length / 2);
-  const names = new Set(goodJoints.map((joint) => joint.joint));
-  const validFoot = (side) => ["heel", "big_toe", "small_toe"].every((part) => names.has(`${side}_${part}`));
-  const safeData = data && !unreliable ? {
-    ...data,
-    joints: goodJoints,
-    foot_tilt: {
-      left: validFoot("l") ? data.foot_tilt?.left : null,
-      right: validFoot("r") ? data.foot_tilt?.right : null,
-    },
-  } : null;
+  const rejectedByQuality = getReprojectionWarnings(data);
+  // Every successfully triangulated joint remains visible, regardless of RMS.
+  // Backend-rejected (nontriangulable) joints have no valid 3D position.
+  const safeData = data;
   const warnings = [
     ...(state.notes ?? []),
     ...(data?.warnings ?? []).map((w) => (typeof w === "string" ? w : JSON.stringify(w))),
     ...(data?.rejected ?? []).map((r) => `${r.joint}: ${r.reason}`),
   ];
-  const status = state.status === "pending" ? "reconstructing…" : state.status === "ready" ? "drag to orbit · wheel to zoom" : "";
+  const status = state.stale
+    ? (state.status === "pending" ? "Loading frame · showing previous pose" : "Previous pose · current frame unavailable")
+    : state.status === "pending" ? "reconstructing…"
+      : state.status === "ready" ? (state.cached ? "cached frame · drag to orbit" : "drag to orbit · wheel to zoom") : "";
   const angles = safeData ? `L ${formatAngle(safeData.foot_tilt?.left)} · R ${formatAngle(safeData.foot_tilt?.right)}` : "";
   const scene = (
     <section ref={box} aria-label="Live 3D skeleton"
@@ -226,7 +268,7 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
         display: "flex", flexDirection: "column", background: "#ffffff",
       }}>
       <header
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", cursor: docked ? "default" : "grab", userSelect: "none", borderBottom: panel.collapsed && !docked ? "none" : "1px solid #e2e8f0" }}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", cursor: docked ? "default" : "grab", userSelect: "none", flex: "0 0 auto", minHeight: 42, borderBottom: panel.collapsed && !docked ? "none" : "1px solid #e2e8f0" }}
         onPointerDown={(event) => {
           if (docked || event.target.closest("button")) return;
           const rect = box.current?.getBoundingClientRect();
@@ -249,10 +291,6 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
         onPointerUp={() => { moving.current = null; }}
         onPointerCancel={() => { moving.current = null; }}>
         <strong style={{ fontSize: 13 }}>3D skeleton</strong>
-        <span style={{ fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {panel.collapsed && !docked ? angles : status}
-        </span>
-        {warnings.length > 0 && <span title="Warnings" style={{ fontSize: 11, color: "#b45309" }}>⚠{warnings.length}</span>}
         <span style={{ flex: 1 }} />
         <button type="button" title={popupOnly ? "Close the separate 3D window" : popout ? "Return 3D to the Label Studio editor" : "Open 3D in a separate window"}
           onClick={popout ? attachPopout : openPopout}
@@ -266,10 +304,73 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
         </button>}
       </header>
       {(docked || popupOnly || !panel.collapsed) && (
-        <div style={{
-          padding: "8px 10px 10px", overflow: "auto", flex: "1 1 auto",
-          minHeight: 0, height: "100%", overscrollBehavior: "contain",
-        }}>
+        <div style={{ display: "flex", flexDirection: "column", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>
+          {/* The viewport stays in place during frame/reconstruction changes. */}
+          <div data-testid="skeleton3d-viewport" style={{
+            display: "flex", flex: "1 1 0", minHeight: 0,
+            padding: "8px 10px 0", overflow: "hidden",
+          }}>
+          <SkeletonCanvas3D data={safeData ?? { joints: [], edges: [] }} config={config} docked={docked || popupOnly}
+            detached={Boolean(popout)} history={history.current}
+            controlledView={sceneView} onChangeView={setSceneView}
+            controlledOptions={sceneOptions} onChangeOptions={setSceneOptions}
+            controlledSelectedJoint={selectedJoint} onChangeSelectedJoint={setSelectedJoint} />
+          </div>
+          {/* Status, sources and quality notices have a fixed-height, scrollable
+              home below the drawing, so they cannot shift the 3D canvas. */}
+          <div data-testid="skeleton3d-diagnostics" style={{
+            flex: "0 0 164px", height: 164, minHeight: 0,
+            overflowY: "auto", overscrollBehavior: "contain",
+            padding: "8px 10px 10px",
+            borderTop: "1px solid #d9e2ec", background: "#fff",
+            fontSize: 12,
+          }}>
+            <div role="status" aria-live="polite" style={{
+              color: state.error ? "#b91c1c" : state.stale ? "#925d12" : "#475569",
+              marginBottom: 7,
+            }}>
+              {status}
+              {state.error ? ` · ${state.error}` : ""}
+              {state.stale && " · Previous pose remains visible until the current frame is ready."}
+            </div>
+          <fieldset style={{
+            margin: "0 0 10px", border: "1px solid #dbe3ef", borderRadius: 6,
+            padding: "7px 9px", minWidth: 0,
+          }}>
+            <legend style={{ padding: "0 5px", fontWeight: 650 }}>Cameras used for triangulation</legend>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "7px 14px", alignItems: "center" }}>
+              {(config?.cameras ?? []).slice().sort((a, b) => a.slot - b.slot).map((camera) => (
+                <label key={camera.slot} style={{
+                  display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer",
+                  opacity: enabledCameraSlots.includes(camera.slot) ? 1 : 0.6,
+                }}>
+                  <input type="checkbox"
+                    checked={enabledCameraSlots.includes(camera.slot)}
+                    aria-label={`Include ${camera.name || `camera_${camera.slot}`} in 3D triangulation`}
+                    onChange={(event) => {
+                      const slot = camera.slot;
+                      setEnabledCameraSlots((previous) =>
+                        event.target.checked
+                          ? [...previous, slot].sort((a, b) => a - b)
+                          : previous.filter((value) => value !== slot));
+                    }}
+                  />
+                  {camera.name || `camera_${camera.slot}`}
+                  <span style={{ color: "#64748b" }}>(slot {camera.slot})</span>
+                </label>
+              ))}
+              <button type="button" onClick={() => setEnabledCameraSlots([0, 1, 2, 3])}
+                style={{ border: "1px solid #cbd5e1", borderRadius: 5, background: "#f8fafc",
+                  padding: "4px 9px", fontSize: 11 }}>
+                All cameras
+              </button>
+            </div>
+            {enabledCameraSlots.length < 2 && (
+              <div role="alert" style={{ marginTop: 6, color: "#b91c1c" }}>
+                Enable at least two cameras to reconstruct 3D points.
+              </div>
+            )}
+          </fieldset>
           {availableSources.length > 0 && (
             <label style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, paddingBottom: 7 }}>
               <strong>3D source</strong>
@@ -285,28 +386,22 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
               </select>
             </label>
           )}
-          <div role="status" aria-live="polite" style={{ fontSize: 12, color: "#b91c1c" }}>{state.error}</div>
           {rejectedByQuality.length > 0 && (
             <div role="alert" style={{
               padding: "9px 11px", margin: "8px 0", border: "1px solid #f4b38c",
               background: "#fff7ed", borderRadius: 5, color: "#9a3412", fontSize: 12,
             }}>
-              <strong>3D reconstruction quality problem:</strong> {rejectedByQuality.length} of {data.joints.length} joints
+              <strong>3D reconstruction quality warning:</strong> {rejectedByQuality.length} of {data.joints.length} joints
               have a reprojection RMS above 10 px.
-              {unreliable
-                ? " The 3D skeleton is hidden because the camera geometry is inconsistent."
-                : " Unreliable joints and their connecting bones are hidden."}
+              All successfully triangulated joints remain visible for correction.
+              High-error joints have red warning rings and their bones are dashed.
               {" "}Check Settings → 3D skeleton: enter the camera resolution corresponding to the
               intrinsics, not an unrelated preview size. For the supplied 3840×2160 Foots mosaic use 1920×1080
               per camera. Check camera order and raw/undistorted image settings.
               Open Warnings and Reconstruction quality below to identify the failing camera slots.
             </div>
           )}
-          <SkeletonCanvas3D data={safeData ?? { joints: [], edges: [] }} config={config} docked={docked || popupOnly}
-            detached={Boolean(popout)} history={history.current}
-            controlledView={sceneView} onChangeView={setSceneView}
-            controlledOptions={sceneOptions} onChangeOptions={setSceneOptions}
-            controlledSelectedJoint={selectedJoint} onChangeSelectedJoint={setSelectedJoint} />
+
           {!data && <p style={{ fontSize: 12, color: "#475569" }}>Waiting for keypoints in at least two camera slots.</p>}
           <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
             Triangulation only, no fitting. Geometric angle, not a clinical assessment; positive means the big toe is higher.
@@ -325,25 +420,17 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
               ))}</ul>
             </details>
           )}
+
+            {angles && <div style={{ color: "#64748b", fontSize: 11 }}>Foot tilt: {angles}</div>}
+          </div>
         </div>
       )}
     </section>
   );
   if (popupOnly) {
-    return (
-      <>
-        <button
-          type="button"
-          className={cn("main-view").elem("show-3d").toClassName()}
-          onClick={openPopout}
-          aria-label="Show 3D skeleton in a separate window"
-          title={popout && !popout.win.closed ? "Focus the open 3D window" : "Open live 3D skeleton on a second screen"}
-        >
-          Show 3D ↗
-        </button>
-        {popout && !popout.win.closed && createPortal(scene, popout.root)}
-      </>
-    );
+    // Only the detached scene is rendered here; its launcher is in BottomBar
+    // alongside Submit/Update and calls the imperative show() method.
+    return popout && !popout.win.closed ? createPortal(scene, popout.root) : null;
   }
   return (
     <>
@@ -351,4 +438,4 @@ export function Skeleton3D({ store, config, docked = false, popupOnly = false })
       {popout ? createPortal(scene, popout.root) : scene}
     </>
   );
-}
+});

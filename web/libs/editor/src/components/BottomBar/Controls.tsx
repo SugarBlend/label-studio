@@ -69,8 +69,8 @@ const ControlButton = observer(({ button, disabled, onClick, variant, look }: Co
   );
 });
 
-export const Controls = controlsInjector<{ annotation: MSTAnnotation }>(
-  observer(({ store, history, annotation }) => {
+export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?: () => void }>(
+  observer(({ store, history, annotation, onShow3D }) => {
     const isReview = store.hasInterface("review") || annotation.canBeReviewed;
     const isNotQuickView = store.hasInterface("topbar:prevnext");
     const historySelected = isDefined(store.annotationStore.selectedHistory);
@@ -151,8 +151,25 @@ export const Controls = controlsInjector<{ annotation: MSTAnnotation }>(
       }
     }
 
+    // Same design system and dimensions as Submit/Update, with an outlined
+    // style to distinguish opening 3D from saving the current annotation.
+    const show3DButton = onShow3D ? (
+      <Button
+        key="show-3d"
+        aria-label="Show 3D"
+        data-testid="bottombar-show-3d-button"
+        variant="neutral"
+        look="outlined"
+        className="w-[150px]"
+        tooltip="Open or focus the live 3D skeleton window"
+        onClick={onShow3D}
+      >
+        Show 3D
+      </Button>
+    ) : null;
+
     if (buttonsReplacement) {
-      return <div className={cn("controls").toClassName()}>{buttons}</div>;
+      return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}</div>;
     }
 
     if (isReview) {
@@ -348,6 +365,6 @@ export const Controls = controlsInjector<{ annotation: MSTAnnotation }>(
       }
     }
 
-    return <div className={cn("controls").toClassName()}>{buttons}</div>;
+    return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}</div>;
   }),
 );

@@ -1,6 +1,6 @@
 import { ff } from "@humansignal/core";
 import { inject } from "mobx-react";
-import { destroy, getRoot, getType, types } from "mobx-state-tree";
+import { destroy, getRoot, getType, isAlive, types } from "mobx-state-tree";
 
 import ImageView from "../../../components/ImageView/ImageView";
 import { customTypes } from "../../../core/CustomTypes";
@@ -41,6 +41,56 @@ const ZOOM_INTENSITY = 0.009;
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 100;
 const MAX_ZOOM_CHANGE_PER_EVENT = 0.3; // Maximum zoom change per wheel event (30%)
+
+/**
+ * Preserve exactly what the user sees (photo, keypoints, bones and camera
+ * labels) while React and Konva replace the current frame. The snapshot is
+ * visual only and is never used for editing or serializing annotations.
+ * Keep it outside the resizing viewer so a changed aspect ratio cannot clip
+ * or move the old frame during the transition.
+ */
+function freezeRenderedFrame(stage, container) {
+  if (!stage?.container() || !container || typeof document === "undefined") return null;
+
+  try {
+    const frame = container.getBoundingClientRect();
+    const stageRect = stage.container().getBoundingClientRect();
+    if (!frame.width || !frame.height || !stageRect.width || !stageRect.height) return null;
+
+    const snapshot = stage.toCanvas({ pixelRatio: Math.min(window.devicePixelRatio || 1, 2) });
+    if (!snapshot?.width || !snapshot?.height) return null;
+
+    const cover = document.createElement("div");
+    cover.setAttribute("aria-hidden", "true");
+    Object.assign(cover.style, {
+      position: "fixed",
+      top: `${frame.top}px`,
+      left: `${frame.left}px`,
+      width: `${frame.width}px`,
+      height: `${frame.height}px`,
+      overflow: "hidden",
+      pointerEvents: "none",
+      background: "white",
+      zIndex: "2147483000",
+    });
+    Object.assign(snapshot.style, {
+      position: "absolute",
+      top: `${stageRect.top - frame.top}px`,
+      left: `${stageRect.left - frame.left}px`,
+      width: `${stageRect.width}px`,
+      height: `${stageRect.height}px`,
+      pointerEvents: "none",
+    });
+    cover.appendChild(snapshot);
+    document.body.appendChild(cover);
+    return cover;
+  } catch (error) {
+    // Some browsers cannot copy a canvas that contains cross-origin pixels.
+    // Frame navigation still works; the snapshot is best-effort in that case.
+    console.warn("Could not retain the previous 2D frame", error);
+    return null;
+  }
+}
 
 /**
  * The `Image` tag shows an image on the page. Use for all image annotation tasks to display an image on the labeling interface.
@@ -195,6 +245,11 @@ const Model = types
   })
   .volatile(() => ({
     currentImage: undefined,
+    /** Requested image stays separate from the displayed image until decoding finishes. */
+    pendingImageIndex: null,
+    imageSwitchRequest: 0,
+    /** DOM-only snapshot, never part of the annotation state or history. */
+    frameTransitionOverlay: null,
     supportSuggestions: true,
     /** Filler element that defines the container height (see ImageView) */
     fillerRef: null,
@@ -796,21 +851,91 @@ const Model = types
 
     setCurrentImage(index = 0) {
       index = index ?? 0;
-      if (index === self.currentImage) return;
+      const next = self.findImageEntity(index);
+      if (!next) return;
+      if (index === self.currentImage) {
+        // Clicking the visible page also cancels an outstanding navigation.
+        self.imageSwitchRequest += 1;
+        self.pendingImageIndex = null;
+        self.clearFrameTransitionOverlay();
+        return;
+      }
 
+      const request = ++self.imageSwitchRequest;
+      if (self.currentImage === undefined || !self.multiImage) {
+        // Initial mounting must remain synchronous.
+        self.currentImage = index;
+        self.currentImageEntity = next;
+        self.preloadImages();
+        return;
+      }
+
+      // Do NOT change currentImage/currentImageEntity here: both the previous
+      // frame and its annotations must remain visible throughout the download.
+      self.pendingImageIndex = index;
+      next.prepareForDisplay().then(
+        (image) => {
+          if (isAlive(self)) self.commitPreparedImage(index, request, image);
+        },
+        (error) => {
+          if (isAlive(self)) self.cancelPreparedImage(request, error);
+        },
+      );
+    },
+
+    commitPreparedImage(index, request, image) {
+      if (request !== self.imageSwitchRequest) return;
+      const next = self.findImageEntity(index);
+      if (!next || !image?.naturalWidth || !image?.naturalHeight || next.currentSrc !== image.src) return;
+
+      // Snapshot BEFORE changing currentImage, while every canvas layer still
+      // belongs to the previous frame. A rapid second switch reuses the
+      // already-visible snapshot rather than capturing a half-painted frame.
+      if (!self.frameTransitionOverlay) {
+        self.frameTransitionOverlay = freezeRenderedFrame(self.stageRef, self.containerRef);
+      }
+
+      const previous = self.currentImageEntity;
+      next.setNaturalWidth(image.naturalWidth);
+      next.setNaturalHeight(image.naturalHeight);
+      next.setDecodedImage(image);
+      next.setImageLoaded(true);
+
+      // MobX batches all changes in this action into a single React update.
       self.currentImage = index;
-      self.currentImageEntity = self.findImageEntity(index);
+      self.currentImageEntity = next;
+      self.pendingImageIndex = null;
+
+      if (self.containerRef) {
+        // Prepare image geometry and region positions BEFORE React renders
+        // the new page. The hidden <img> still belongs to the previous page.
+        self.updateImageSize(null, image);
+      }
       self.preloadImages();
+      if (previous && previous !== next) previous.setDecodedImage(null);
+    },
+
+    cancelPreparedImage(request, error) {
+      if (request !== self.imageSwitchRequest) return;
+      self.pendingImageIndex = null;
+      // Restore the currently rendered frame if a subsequent navigation
+      // failed while the visual snapshot from an earlier switch was active.
+      self.clearFrameTransitionOverlay();
+      console.error("Unable to prepare the requested frame", error);
+    },
+
+    clearFrameTransitionOverlay() {
+      self.frameTransitionOverlay?.remove();
+      self.frameTransitionOverlay = null;
     },
 
     preloadImages() {
-      self.currentImageEntity.setImageLoaded(false);
-      self.currentImageEntity.preload();
+      if (!self.currentImageEntity.imageLoaded) self.currentImageEntity.preload();
 
       if (self.multiImage) {
         const [currentIndex, length] = [self.currentImage, self.imageEntities.length];
         const prevSliceIndex = clamp(currentIndex - IMAGE_PRELOAD_COUNT, 0, currentIndex);
-        const nextSliceIndex = clamp(currentIndex + 1 + IMAGE_PRELOAD_COUNT, currentIndex, length - 1);
+        const nextSliceIndex = clamp(currentIndex + 1 + IMAGE_PRELOAD_COUNT, currentIndex, length);
 
         const images = [
           ...self.imageEntities.slice(prevSliceIndex, currentIndex),
@@ -1232,8 +1357,19 @@ const Model = types
       }
     },
 
-    updateImageSize(ev) {
-      const { naturalWidth, naturalHeight } = self.imageRef ?? ev.target;
+    updateImageSize(ev, preparedImage = null) {
+      const source = preparedImage ?? self.imageRef ?? ev?.target;
+      if (!source) return;
+      const { naturalWidth, naturalHeight } = source;
+
+      // The prepared frame has already been laid out before it became visible.
+      // Its hidden DOM <img> will still fire onLoad, but must not reset zoom,
+      // redraw regions or reinitialize annotation history for a second time.
+      if (!preparedImage && self.imageIsLoaded && self.sizeUpdated &&
+          self.naturalWidth === naturalWidth && self.naturalHeight === naturalHeight) {
+        self.setReady(true);
+        return;
+      }
 
       self.naturalWidth = naturalWidth;
       self.naturalHeight = naturalHeight;

@@ -1,4 +1,5 @@
 import { types, getParent, addDisposer } from "mobx-state-tree";
+import { when } from "mobx";
 import { FileLoader } from "../../../utils/FileLoader";
 import { imageCache } from "@humansignal/core";
 import { clamp } from "../../../utils/utilities";
@@ -66,6 +67,8 @@ export const ImageEntity = types
     currentSrc: undefined,
     /** Is image loaded using `<img/>` tag and cached by the browser */
     imageLoaded: false,
+    /** Fully decoded browser image, ready for the Konva canvas on the first paint. */
+    decodedImage: null,
     /** Track if we've attempted a retry after error */
     _retryAttempted: false,
     /** Track the original URL for error recovery */
@@ -83,6 +86,41 @@ export const ImageEntity = types
     },
   }))
   .actions((self) => ({
+    /** Prepare a non-visible page without changing the active 2D canvas. */
+    async prepareForDisplay() {
+      // A failed previous attempt must not short-circuit the next download wait.
+      if (self.error) self.setError(false);
+      self.preload();
+      await when(() => self.downloaded || self.error);
+      if (self.error || !self.currentSrc) throw new Error(`Unable to download image: ${self.src}`);
+
+      const src = self.currentSrc;
+      if (self.decodedImage?.src === src && self.decodedImage.naturalWidth > 0) {
+        return self.decodedImage;
+      }
+
+      const image = new window.Image();
+      if (self.imageCrossOrigin) image.crossOrigin = self.imageCrossOrigin;
+      if (typeof image.decode === "function") {
+        image.src = src;
+        await image.decode();
+      } else {
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = () => reject(new Error(`Unable to decode image: ${self.src}`));
+          image.src = src;
+        });
+      }
+      if (self.currentSrc !== src || !image.naturalWidth || !image.naturalHeight) {
+        throw new Error(`Image changed or is empty: ${self.src}`);
+      }
+      return image;
+    },
+
+    setDecodedImage(image) {
+      self.decodedImage = image;
+    },
+
     preload() {
       if (self.ensurePreloaded() || !self.src) return;
 
@@ -254,6 +292,7 @@ export const ImageEntity = types
         self._hasCacheRef = true;
       }
       self.setCurrentSrc(src);
+      self.error = false;
       self.setDownloaded(true);
       self.setProgress(1);
       self.setDownloading(false);

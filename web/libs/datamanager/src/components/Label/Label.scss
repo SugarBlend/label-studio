@@ -80,13 +80,8 @@
     }
   }
 
-  &_loading {
-    .label-view__lsf-container {
-      opacity: 0.2;
-      pointer-events: none;
-    }
-  }
-
+  // Task switches retain the previous fully drawn editor until the next
+  // task is ready. Never dim the existing image or draw a loading overlay.
   &__lsf-container {
     width: 100%;
     height: 100%;

@@ -110,23 +110,36 @@ export function calibrationResolutionWarnings(cameras, mosaicWidth, mosaicHeight
   return notes;
 }
 
-export function adaptSkeleton(snapshot, config) {
+export function adaptSkeleton(snapshot, config, enabledSlots = [0, 1, 2, 3]) {
   const fail = (error) => ({ observations: [], edges: [], notes: [], error });
+  // Camera selection affects only this 3D reconstruction. Never mutate the
+  // original 2D points, project calibration or saved annotations.
+  const included = new Set(enabledSlots);
+  if (included.size < 2) {
+    return fail("Select at least two cameras to triangulate 3D points.");
+  }
   const cameras = config?.cameras;
   if (!Array.isArray(cameras) || cameras.length !== 4 || new Set(cameras.map((c) => c.slot)).size !== 4 ||
       cameras.some((c) => ![0, 1, 2, 3].includes(c.slot) || !Number.isFinite(c.image_width) ||
         !Number.isFinite(c.image_height) || c.image_width <= 0 || c.image_height <= 0)) {
     return fail("Four calibrated camera slots (0–3) are required.");
   }
-  if (!snapshot.points.length) return fail("Add matching keypoints in at least two camera slots.");
-  if (new Set(snapshot.points.map((p) => `${p.image}:${p.index}`)).size !== 1) {
+  // Exclude disabled slots before checking annotation data: a noisy or
+  // incorrectly annotated camera must not prevent triangulating the others.
+  const points = snapshot.points.filter((point) => {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return true;
+    const slot = (point.y < 50 ? 0 : 2) + (point.x < 50 ? 0 : 1);
+    return included.has(slot);
+  });
+  if (!points.length) return fail("No keypoints in the enabled cameras.");
+  if (new Set(points.map((p) => `${p.image}:${p.index}`)).size !== 1) {
     return fail("Use a single 2×2 mosaic image; multiple image sources are ambiguous.");
   }
   const observations = [];
   const candidates = new Map();
   const groups = [new Set(), new Set(), new Set(), new Set()];
   const pointsById = new Map();
-  for (const point of snapshot.points) {
+  for (const point of points) {
     if (![point.x, point.y, point.width, point.height].every(Number.isFinite) ||
         point.width <= 1 || point.height <= 1 || point.x < 0 || point.x > 100 || point.y < 0 || point.y > 100) {
       return fail("Keypoint coordinates or original image dimensions are unavailable or invalid.");
@@ -163,7 +176,10 @@ export function adaptSkeleton(snapshot, config) {
     const points = [...candidates.entries()].filter(([key]) => key.startsWith(`${slot}:`)).flatMap(([, list]) => list);
     return points.length ? [median(points.map((c) => c.observation.x)), median(points.map((c) => c.observation.y))] : null;
   });
-  const notes = calibrationResolutionWarnings(cameras, snapshot.points[0]?.width, snapshot.points[0]?.height);
+  const notes = calibrationResolutionWarnings(
+    cameras.filter((camera) => included.has(camera.slot)),
+    points[0]?.width, points[0]?.height,
+  );
   for (const [key, list] of candidates) {
     const slot = Number(key.slice(0, key.indexOf(":")));
     const joint = key.slice(key.indexOf(":") + 1);
@@ -186,27 +202,105 @@ export function adaptSkeleton(snapshot, config) {
   return { observations, edges, notes, error: null };
 }
 
-/** Latest-only scheduling: invalidation aborts immediately, before the debounce. */
-export function createReconstructionRunner({ request, onState, delay = 200 }) {
+/**
+ * Session-only, bounded LRU. Never shared between editors or users and never
+ * persisted into browser storage, Django cache, or other server-side sessions.
+ * Entries are exact matches on task, annotation, calibration AND observations.
+ */
+export function createFrameCache(capacity = 8) {
+  const entries = new Map();
+  return {
+    get(key) {
+      if (!entries.has(key)) return undefined;
+      const value = entries.get(key);
+      entries.delete(key);
+      entries.set(key, value);
+      return value;
+    },
+    set(key, value) {
+      // Don't cache failed/empty triangulations.
+      if (!Array.isArray(value?.joints) || value.joints.length === 0) return;
+      entries.delete(key);
+      entries.set(key, value);
+      while (entries.size > capacity) entries.delete(entries.keys().next().value);
+    },
+    clear() { entries.clear(); },
+    get size() { return entries.size; },
+  };
+}
+
+export function reconstructionKey(input) {
+  return JSON.stringify([
+    input.task, input.annotation, input.config,
+    input.observations, input.edges,
+  ]);
+}
+
+/**
+ * Latest-only, bounded server scheduling.
+ *
+ * - Frame changes have a very short debounce, but server requests are paced.
+ * - Drag edits are coalesced so many users don't flood Django with requests.
+ * - Already reconstructed *identical* frames are served from the editor's
+ *   private in-memory LRU without an HTTP request.
+ * - Aborted/stale replies must never overwrite a newer frame.
+ */
+export function createReconstructionRunner({
+  request, onState, delay = 200, fastDelay = delay,
+  minInterval = 0, cache, now = () => Date.now(),
+}) {
   let generation = 0;
   let timer;
   let controller;
+  let signature;
+  let lastRequestAt = -Infinity;
+  let lastRequestedTask;
+  let lastRequestedAnnotation;
   return {
     update(input) {
+      const key = reconstructionKey(input);
+      // An identical state requires no new work. Keep the previous
+      // in-flight request valid instead of aborting it.
+      if (key === signature && !input.error) return;
       const current = ++generation;
+      signature = key;
       clearTimeout(timer);
       controller?.abort();
-      onState({ status: input.error ? "invalid" : "pending", error: input.error, data: null, notes: input.notes ?? [] });
-      if (input.error) return;
+      controller = undefined;
+
+      if (input.error) {
+        onState({ status: "invalid", error: input.error, data: null, notes: input.notes ?? [] });
+        return;
+      }
+
+      const hit = cache?.get(key);
+      if (hit) {
+        onState({ status: "ready", error: null, data: hit, notes: input.notes ?? [], cached: true });
+        return;
+      }
+
+      onState({ status: "pending", error: null, data: null, notes: input.notes ?? [] });
+      const newFrame = input.task !== lastRequestedTask || input.annotation !== lastRequestedAnnotation;
+      const debounce = newFrame ? fastDelay : delay;
+      const elapsed = now() - lastRequestAt;
+      const wait = Math.max(debounce, Math.max(0, minInterval - elapsed));
       timer = setTimeout(async () => {
         controller = new AbortController();
+        lastRequestAt = now();
+        lastRequestedTask = input.task;
+        lastRequestedAnnotation = input.annotation;
         try {
           const data = await request(input, current, controller.signal);
-          if (current === generation) onState({ status: "ready", data, error: null, notes: input.notes ?? [] });
+          if (current === generation) {
+            cache?.set(key, data);
+            onState({ status: "ready", data, error: null, notes: input.notes ?? [], cached: false });
+          }
         } catch (error) {
-          if (current === generation && error.name !== "AbortError") onState({ status: "error", data: null, error: error.message, notes: [] });
+          if (current === generation && error.name !== "AbortError") {
+            onState({ status: "error", data: null, error: error.message, notes: input.notes ?? [] });
+          }
         }
-      }, delay);
+      }, wait);
     },
     dispose() { ++generation; clearTimeout(timer); controller?.abort(); },
   };

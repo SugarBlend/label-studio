@@ -117,6 +117,43 @@ class GeometryTests(unittest.TestCase):
         _, R, t, _ = geometry.camera_parameters(camera)
         np.testing.assert_allclose(t, -R @ [1, 2, 3])
 
+    def test_analytic_undistortion_matches_independent_finite_difference_reference(self):
+        # Keep the previous implementation as a test oracle; do not use it in
+        # production. This covers radial, tangential and rational distortion.
+        K = np.array([[1100., 0., 960.], [0., 1060., 540.], [0., 0., 1.]])
+        inverse_K = np.linalg.inv(K)
+        samples = np.random.default_rng(15).uniform([0, 0], [1920, 1080], (32, 2))
+        distortions = [
+            np.zeros(8),
+            np.array([-0.13, 0.07, 0.0005, -0.0003, -0.014, 0, 0, 0]),
+            np.array([0.1, -0.03, 0.002, -0.001, 0.001, 0.01, 0.004, -0.002]),
+        ]
+
+        def reference(pixel, distortion):
+            target = (inverse_K @ np.array([*pixel, 1]))[:2]
+            point = target.copy()
+            for _ in range(30):
+                residual = geometry.distort(point, distortion) - target
+                if np.linalg.norm(residual) < 1e-10:
+                    return point
+                eps = 1e-6
+                jacobian = np.column_stack([
+                    (geometry.distort(point + d, distortion) -
+                     geometry.distort(point - d, distortion)) / (2*eps)
+                    for d in (np.array([eps, 0]), np.array([0, eps]))
+                ])
+                point -= np.linalg.solve(jacobian, residual)
+            raise AssertionError('Reference failed to converge')
+
+        for distortion in distortions:
+            for pixel in samples:
+                with self.subTest(distortion=distortion.tolist(), pixel=pixel.tolist()):
+                    expected = reference(pixel, distortion)
+                    direct = geometry.undistort(pixel, K, distortion)
+                    cached_inverse = geometry.undistort(pixel, K, distortion, inverse_K)
+                    np.testing.assert_allclose(direct, expected, atol=1e-9, rtol=1e-9)
+                    np.testing.assert_allclose(cached_inverse, expected, atol=1e-9, rtol=1e-9)
+
     def test_distorted_reconstruction(self):
         config = configuration()
         for camera in config['cameras']:
