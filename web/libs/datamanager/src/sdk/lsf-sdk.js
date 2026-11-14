@@ -32,6 +32,71 @@ const waitForPaint = () =>
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   });
 
+/**
+ * A task switch destroys the old MobX/Konva tree before the next image has
+ * decoded. Retain a non-interactive copy of the *entire rendered editor*
+ * (including Konva canvas pixels and region lists) outside the React tree.
+ * Unlike Konva.toCanvas(), copying each browser canvas with drawImage works
+ * for cross-origin-tainted canvases and does not require reading pixels.
+ */
+const retainCurrentEditor = (root) => {
+  if (!root || !root.isConnected || !root.querySelector(".konvajs-content canvas")) return null;
+
+  try {
+    const overlay = document.createElement("div");
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.className = "label-studio-retained-task-frame";
+    Object.assign(overlay.style, {
+      position: "absolute",
+      inset: "0",
+      overflow: "hidden",
+      background: "var(--color-neutral-surface, white)",
+      pointerEvents: "none",
+      zIndex: "2147483000",
+    });
+
+    const clone = root.cloneNode(true);
+    clone.removeAttribute("id");
+    clone.setAttribute("aria-hidden", "true");
+    clone.style.pointerEvents = "none";
+    clone.style.height = "100%";
+    clone.style.width = "100%";
+
+    const originals = root.querySelectorAll("canvas");
+    const copies = clone.querySelectorAll("canvas");
+    originals.forEach((original, index) => {
+      const copy = copies[index];
+      if (!copy || original.width === 0 || original.height === 0) return;
+      try {
+        copy.width = original.width;
+        copy.height = original.height;
+        copy.getContext("2d")?.drawImage(original, 0, 0);
+      } catch (error) {
+        console.warn("Unable to copy one of the editor canvas layers", error);
+      }
+    });
+
+    overlay.appendChild(clone);
+    // The parent is .label-view__lsf-wrapper (position: relative), not the
+    // React-owned #label-studio-dm, so the overlay survives resetState().
+    root.parentElement.appendChild(overlay);
+    clone.scrollTop = root.scrollTop;
+    clone.scrollLeft = root.scrollLeft;
+    const sourceNodes = root.querySelectorAll("*");
+    const clonedNodes = clone.querySelectorAll("*");
+    sourceNodes.forEach((node, index) => {
+      if (node.scrollTop || node.scrollLeft) {
+        clonedNodes[index].scrollTop = node.scrollTop;
+        clonedNodes[index].scrollLeft = node.scrollLeft;
+      }
+    });
+    return overlay;
+  } catch (error) {
+    console.warn("Unable to retain the previous task editor", error);
+    return null;
+  }
+};
+
 const DEFAULT_INTERFACES = [
   "basic",
   "controls",
@@ -109,6 +174,11 @@ export class LSFWrapper {
 
   /** @type {boolean} */
   labelStream = false;
+
+  /** Non-interactive snapshot of the last complete task UI. */
+  retainedEditor = null;
+  retainedEditorRequest = 0;
+  retainedEditorAnimation = null;
 
   /** @type {boolean} */
   isInteractivePreannotations = false;
@@ -334,6 +404,10 @@ export class LSFWrapper {
       return console.error("Make sure that LSF was properly initialized");
     }
 
+    // Cover the fetch interval too: before a new task even exists the SDK
+    // normally fades the editor and shows a striped loading indicator.
+    this.beginRetainedTaskTransition();
+
     const nextAction = async () => {
       const tasks = this.datamanager.store.taskStore;
 
@@ -365,6 +439,7 @@ export class LSFWrapper {
 
       // Add new data from received task
       if (newTask) await this.selectTask(newTask, annotationID, fromHistory);
+      else this.discardRetainedTaskTransition();
     };
 
     if (isFF(FF_DEV_2887) && this.lsf?.commentStore?.hasUnsaved) {
@@ -379,7 +454,12 @@ export class LSFWrapper {
       return;
     }
 
-    await nextAction();
+    try {
+      await nextAction();
+    } catch (error) {
+      this.discardRetainedTaskTransition();
+      throw error;
+    }
   }
 
   exitStream() {
@@ -403,6 +483,10 @@ export class LSFWrapper {
 
   async setLSFTask(task, annotationID, fromHistory, selectPrediction = false) {
     if (!this.lsf) return;
+
+    // Called both from loadTask() and directly by Data Manager quick view.
+    // Capture before resetState() removes the previous Konva stage.
+    const transitionRequest = this.beginRetainedTaskTransition();
 
     if (isFF(FF_FIT_1304_STRICT_OVERLAP)) {
       this.dismissOverlapToast();
@@ -478,8 +562,16 @@ export class LSFWrapper {
       this.lsf.initializeStore(lsfTask);
     });
 
-    await this.setAnnotation(annotationID, fromHistory || isRejectedQueue, selectPrediction);
+    try {
+      await this.setAnnotation(annotationID, fromHistory || isRejectedQueue, selectPrediction);
+    } catch (error) {
+      this.discardRetainedTaskTransition();
+      throw error;
+    }
     this.setLoading(false);
+    // Keep showing the previous rendered task until this task's new image and
+    // Konva layers are actually mounted and have had time to paint.
+    this.releaseRetainedTaskTransitionWhenReady(transitionRequest);
 
     // Prefetch upcoming tasks so switching to them is instant.
     // Every navigation path (DM quick view, prev/next buttons, history, label stream) ends here.
@@ -1458,8 +1550,78 @@ export class LSFWrapper {
     return result;
   }
 
+  /**
+   * Start a visual-only task transition; never clone a half-rendered editor.
+   * Multiple quick clicks reuse the original retained frame. The request id
+   * invalidates stale release callbacks from earlier task switches.
+   */
+  beginRetainedTaskTransition() {
+    const request = ++this.retainedEditorRequest;
+    if (this.retainedEditorAnimation !== null) {
+      cancelAnimationFrame(this.retainedEditorAnimation);
+      this.retainedEditorAnimation = null;
+    }
+    if (!this.retainedEditor) this.retainedEditor = retainCurrentEditor(this.root);
+    return request;
+  }
+
+  discardRetainedTaskTransition() {
+    this.retainedEditorRequest += 1;
+    if (this.retainedEditorAnimation !== null) {
+      cancelAnimationFrame(this.retainedEditorAnimation);
+      this.retainedEditorAnimation = null;
+    }
+    this.retainedEditor?.remove();
+    this.retainedEditor = null;
+    this.setFrozen(false);
+  }
+
+  releaseRetainedTaskTransitionWhenReady(request) {
+    if (!this.retainedEditor) return;
+    const started = Date.now();
+    let stablePaintFrames = 0;
+    const check = () => {
+      if (request !== this.retainedEditorRequest || !this.root?.isConnected) return;
+      const images = Array.from(this.root.querySelectorAll(".image img[data-loaded]"));
+      const haveStage = !!this.root.querySelector(".konvajs-content canvas");
+      const imagesReady = images.length === 0 || images.every(
+        (image) => image.dataset.loaded === "true" && image.complete && image.naturalWidth > 0,
+      );
+      const ready = !!this.lsf?.annotationStore?.selected && haveStage && imagesReady && !this.lsf.isLoading;
+
+      if (ready) {
+        stablePaintFrames += 1;
+        if (stablePaintFrames >= 3) {
+          this.discardRetainedTaskTransition();
+          return;
+        }
+      } else {
+        stablePaintFrames = 0;
+      }
+
+      // A failed task/image request must not leave an unremovable visual
+      // shield on screen forever. Normal slow downloads retain the image.
+      if (Date.now() - started > 60000) {
+        console.warn("Timed out waiting for the next task image; restoring live editor");
+        this.discardRetainedTaskTransition();
+        return;
+      }
+      this.retainedEditorAnimation = requestAnimationFrame(check);
+    };
+    this.retainedEditorAnimation = requestAnimationFrame(check);
+  }
+
   /** @private */
   setLoading(isLoading, shouldReset = false) {
+    // Keep the real editor inert during the retained-frame transition. The
+    // new editor may be temporarily unmounted; the static old view stays on
+    // top, not a white overlay or a spinner.
+    if (this.retainedEditor) {
+      if (this.lsf?.isLoading) this.lsf.setFlags({ isLoading: false });
+      this.setFrozen(true);
+      return;
+    }
+
     // Label stream with instant switching: while submitting / fetching the next task keep the
     // current task on screen (frozen) instead of replacing the whole editor with a loader, so
     // the next task (with prefetched images) replaces it directly.
@@ -1519,6 +1681,7 @@ export class LSFWrapper {
 
   destroy() {
     cancelPrefetch();
+    this.discardRetainedTaskTransition();
     this.setFrozen(false);
 
     // Clean up overlap error event listeners and dismiss toast (only when feature flag is enabled)
