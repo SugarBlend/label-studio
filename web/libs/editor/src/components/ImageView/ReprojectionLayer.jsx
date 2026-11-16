@@ -3,6 +3,7 @@ import { observer } from "mobx-react";
 import { Circle, Group, Layer, Line } from "react-konva";
 import { ReprojectionContext } from "../Skeleton3D/ReprojectionContext";
 import { colorOf } from "../Skeleton3D/topology";
+import { normalizeJoint } from "../Skeleton3D/adapter";
 
 /**
  * Read-only dotted projections of reconstructed 3D joints. Native camera
@@ -30,7 +31,24 @@ export const ReprojectionLayer = observer(({ item }) => {
 
   const cameras = state.cameras ?? [];
   const zoom = item.stageZoom;
-  if (!Number.isFinite(zoom) || zoom <= 0) return null;
+  const viewScale = item.zoomScale;
+  if (!Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(viewScale) || viewScale <= 0) return null;
+
+  // Use the same radius formula as the editable KeyPointRegion (canvasWidth / zoomScale).
+  // Resolve per joint and camera, then fall back to the same joint in another camera.
+  const regionRadii = new Map();
+  const fallbackRadii = new Map();
+  for (const region of item.regs) {
+    if (region.type !== "keypointregion" || region.hidden || region.labels?.length !== 1 ||
+        !Number.isFinite(region.x) || !Number.isFinite(region.y)) continue;
+    const name = normalizeJoint(region.labels[0]);
+    const slot = (region.y >= 50 ? 2 : 0) + (region.x >= 50 ? 1 : 0);
+    const radius = Math.max(region.canvasWidth, 2) / viewScale;
+    if (!Number.isFinite(radius) || radius <= 0) continue;
+    regionRadii.set(slot + ":" + name, radius);
+    if (!fallbackRadii.has(name)) fallbackRadii.set(name, radius);
+  }
+  const defaultRadius = Math.max(item.stageWidth * 0.006, 2) / viewScale;
 
   const circles = [];
   const curves = [];
@@ -88,12 +106,13 @@ export const ReprojectionLayer = observer(({ item }) => {
           x < 0 || x > width || y < 0 || y > height) continue;
 
       const key = `${point.slot}:${joint.joint}`;
+      const radius = regionRadii.get(key) ?? fallbackRadii.get(joint.joint) ?? defaultRadius;
       circles.push(
         <Circle
           key={`${key}:outline`}
           x={x * zoom}
           y={y * zoom}
-          radius={8}
+          radius={radius}
           stroke={color}
           strokeWidth={1.6}
           opacity={0.4}
@@ -106,7 +125,7 @@ export const ReprojectionLayer = observer(({ item }) => {
           key={`${key}:centre`}
           x={x * zoom}
           y={y * zoom}
-          radius={2}
+          radius={Math.max(0.75 / viewScale, radius * 0.25)}
           fill={color}
           opacity={0.35}
           stroke="#ffffff"
