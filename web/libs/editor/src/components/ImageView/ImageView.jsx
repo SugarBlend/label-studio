@@ -25,6 +25,7 @@ import { Pagination } from "../../common/Pagination/Pagination";
 import { Image } from "./Image";
 import { SkeletonRelationsLayer } from "./SkeletonRelationsLayer";
 import { CameraMosaicOverlay } from "./CameraMosaicOverlay";
+import { ReprojectionLayer } from "./ReprojectionLayer";
 
 Konva.showWarnings = false;
 
@@ -1485,6 +1486,7 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
       {isFF(FF_LSDV_4930) ? <TransformerBack item={item} /> : null}
 
       <SkeletonRelationsLayer item={item} />
+      <ReprojectionLayer item={item} />
 
       {renderableRegions.map(([groupName, list]) => {
         const useLayers = groupName.match(/brush/i) === null;
