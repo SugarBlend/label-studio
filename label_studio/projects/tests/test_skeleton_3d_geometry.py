@@ -109,6 +109,20 @@ class GeometryTests(unittest.TestCase):
         self.assertFalse(geometry.reconstruct(config, observations(config)[:1])['joints'])
         self.assertEqual(len(geometry.reconstruct(config, observations(config)[:2])['joints']), 1)
 
+    def test_reprojects_to_all_four_cameras_with_distortion(self):
+        config = configuration()
+        # Only two observations, but projections for all four cameras.
+        for camera in config['cameras']:
+            camera['calibration']['dist'] = [0.08, -0.015, 0.002, -0.001, 0.001]
+        full_observations = observations(config)
+        result = geometry.reconstruct(config, full_observations[:2])
+        self.assertFalse(result['rejected'])
+        projections = result['joints'][0]['reprojections']
+        self.assertEqual([p['slot'] for p in projections], [0, 1, 2, 3])
+        for projected, expected in zip(projections, full_observations):
+            self.assertAlmostEqual(projected['x'], expected['x'], places=5)
+            self.assertAlmostEqual(projected['y'], expected['y'], places=5)
+
     def test_fit3d_camera_center(self):
         camera = configuration()['cameras'][0]
         camera['calibration'] = {'intrinsics_w_distortion': {'f': [500, 500], 'c': [500, 500],
