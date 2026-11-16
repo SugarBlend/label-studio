@@ -69,8 +69,8 @@ const ControlButton = observer(({ button, disabled, onClick, variant, look }: Co
   );
 });
 
-export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?: () => void }>(
-  observer(({ store, history, annotation, onShow3D }) => {
+export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?: () => void; onToggleReprojection?: () => void; reprojectionEnabled?: boolean }>(
+  observer(({ store, history, annotation, onShow3D, onToggleReprojection, reprojectionEnabled }) => {
     const isReview = store.hasInterface("review") || annotation.canBeReviewed;
     const isNotQuickView = store.hasInterface("topbar:prevnext");
     const historySelected = isDefined(store.annotationStore.selectedHistory);
@@ -168,8 +168,23 @@ export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?:
       </Button>
     ) : null;
 
+    const reprojectionButton = onToggleReprojection ? (
+      <Button
+        key="show-reprojection"
+        aria-label={reprojectionEnabled ? "Hide Reprojection" : "Show Reprojection"}
+        data-testid="bottombar-show-reprojection-button"
+        variant="neutral"
+        look="outlined"
+        className="w-[170px]"
+        tooltip="Show calibrated 3D joint reprojections in every 2D camera"
+        onClick={onToggleReprojection}
+      >
+        {reprojectionEnabled ? "Hide Reprojection" : "Show Reprojection"}
+      </Button>
+    ) : null;
+
     if (buttonsReplacement) {
-      return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}</div>;
+      return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}{reprojectionButton}</div>;
     }
 
     if (isReview) {
@@ -365,6 +380,6 @@ export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?:
       }
     }
 
-    return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}</div>;
+    return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}{reprojectionButton}</div>;
   }),
 );
