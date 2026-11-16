@@ -123,6 +123,24 @@ class GeometryTests(unittest.TestCase):
             self.assertAlmostEqual(projected['x'], expected['x'], places=5)
             self.assertAlmostEqual(projected['y'], expected['y'], places=5)
 
+    def test_camera_rays_and_distorted_epipolar_curves(self):
+        config = configuration()
+        for camera in config['cameras']:
+            camera['calibration']['dist'] = [0.08, -0.01, 0.001, -0.002, 0.003]
+        sample = observations(config)[:2]
+        result = geometry.reconstruct(config, sample)
+        self.assertEqual(len(result['joints']), 1)
+        joint = result['joints'][0]
+        self.assertEqual({ray['slot'] for ray in joint['camera_rays']}, {0, 1})
+        self.assertEqual(len(joint['ray_projections']), 6)
+        for ray in joint['camera_rays']:
+            self.assertEqual(len(ray['origin']), 3)
+            self.assertAlmostEqual(np.linalg.norm(ray['direction']), 1., places=7)
+        for projected in joint['ray_projections']:
+            self.assertNotEqual(projected['source_slot'], projected['target_slot'])
+            self.assertGreaterEqual(len(projected['path']), 2)
+            self.assertTrue(np.isfinite(projected['path']).all())
+
     def test_fit3d_camera_center(self):
         camera = configuration()['cameras'][0]
         camera['calibration'] = {'intrinsics_w_distortion': {'f': [500, 500], 'c': [500, 500],
