@@ -80,7 +80,7 @@ class App extends Component {
   skeleton3dRef = React.createRef();
 
 
-  state = { reprojectionEnabled: false, reprojection: null };
+  state = { reprojectionEnabled: false, camerasEnabled: false, reprojection: null };
   reprojectionDisposer = null;
   reprojectionRunner = null;
   reprojectionCache = createFrameCache(8);
@@ -93,7 +93,14 @@ class App extends Component {
       reprojectionEnabled: !reprojectionEnabled,
       reprojection: null,
     }), () => {
-      if (this.state.reprojectionEnabled) this.startReprojection();
+      if (this.state.reprojectionEnabled || this.state.camerasEnabled) this.startReprojection();
+      else this.stopReprojection();
+    });
+  };
+
+  toggleCameras = () => {
+    this.setState(({ camerasEnabled }) => ({ camerasEnabled: !camerasEnabled, reprojection: null }), () => {
+      if (this.state.camerasEnabled || this.state.reprojectionEnabled) this.startReprojection();
       else this.stopReprojection();
     });
   };
@@ -112,7 +119,7 @@ class App extends Component {
       minInterval: 250,
       onState: (next) => {
         const target = this.reprojectionTarget;
-        if (!this.state.reprojectionEnabled || !target) return;
+        if ((!this.state.reprojectionEnabled && !this.state.camerasEnabled) || !target) return;
         const reprojection = next.status === "ready" && next.data?.joints?.length
           ? { ...target, data: next.data, cameras: settings.cameras }
           : null;
@@ -354,7 +361,7 @@ class App extends Component {
         className={cn("editor").mod({ fullscreen: settings.fullscreen }).toClassName()}
         ref={isFF(FF_LSDV_4620_3_ML) ? reactCleaner(this) : null}
       >
-        <ReprojectionContext.Provider value={{ enabled: this.state.reprojectionEnabled, ...this.state.reprojection }}>
+        <ReprojectionContext.Provider value={{ enabled: this.state.reprojectionEnabled, camerasEnabled: this.state.camerasEnabled, ...this.state.reprojection }}>
         <QueryClientProvider client={queryClient}>
           <Settings store={store} />
           <Provider store={store}>
@@ -371,7 +378,7 @@ class App extends Component {
               {/* The 3D viewer stays mounted here across frame changes, while
                   its Show 3D button is rendered next to Submit/Update in BottomBar. */}
               {skeletonEnabled && (
-                <Skeleton3D ref={this.skeleton3dRef} store={store} config={getEnv(store).skeleton3d} popupOnly />
+                <Skeleton3D ref={this.skeleton3dRef} store={store} config={getEnv(store).skeleton3d} popupOnly externalCamerasEnabled={this.state.camerasEnabled} />
               )}
               <div
                 className={cn("wrapper")
@@ -385,7 +392,7 @@ class App extends Component {
                 {isBulkMode || !store.hasInterface("side-column") || !as.selected ? (
                   <>
                     {mainContent}
-                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} onToggleReprojection={skeletonEnabled ? this.toggleReprojection : undefined} reprojectionEnabled={this.state.reprojectionEnabled} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} onToggleReprojection={skeletonEnabled ? this.toggleReprojection : undefined} reprojectionEnabled={this.state.reprojectionEnabled} onToggleCameras={skeletonEnabled ? this.toggleCameras : undefined} camerasEnabled={this.state.camerasEnabled} />}
                   </>
                 ) : (
                   <SideTabsPanels
@@ -397,7 +404,7 @@ class App extends Component {
                     focusTab={store.commentStore.tooltipMessage ? "comments" : null}
                   >
                     {mainContent}
-                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} onToggleReprojection={skeletonEnabled ? this.toggleReprojection : undefined} reprojectionEnabled={this.state.reprojectionEnabled} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} onToggleReprojection={skeletonEnabled ? this.toggleReprojection : undefined} reprojectionEnabled={this.state.reprojectionEnabled} onToggleCameras={skeletonEnabled ? this.toggleCameras : undefined} camerasEnabled={this.state.camerasEnabled} />}
                   </SideTabsPanels>
                 )}
               </div>
