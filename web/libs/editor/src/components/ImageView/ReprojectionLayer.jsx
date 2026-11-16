@@ -5,18 +5,17 @@ import { ReprojectionContext } from "../Skeleton3D/ReprojectionContext";
 import { normalizeJoint } from "../Skeleton3D/adapter";
 import { cameraColorOf } from "../Skeleton3D/topology";
 
-
 /**
- * Read-only reprojection diagnostics for ONE actively selected 2D keypoint.
+ * Read-only 2D reconstruction diagnostics:
+ * - Show Reprojection: all triangulated joints in all calibrated cameras.
+ * - Cameras: epipolar curves for the one selected keypoint only.
+ * - Residual displacement lines: the selected keypoint only, to avoid
+ *   clutter when showing the whole skeleton.
  *
- * Markers use per-camera point sizes with a dotted unfilled outline. The
- * colour indicates the measured 2D reprojection residual in calibration
- * pixels (green at 0, yellow at 5, red at 10+ pixels). No annotation in a
- * target camera means there is no measurable residual: draw a neutral ring.
- *
- * The 2D camera rays are epipolar curves generated from the actual observed
- * camera rays; line colour identifies the source camera. None of these
- * graphics respond to pointer events or enter annotation serialization.
+ * Reprojection rings are unfilled, coloured by each camera's native-pixel
+ * residual (green 0px, yellow 5px, red >=10px, gray if unannotated).
+ * Markers use the radius of the corresponding original 2D region.
+ * No shape here is interactive or stored in an annotation.
  */
 export const ReprojectionLayer = observer(({ item }) => {
   const state = useContext(ReprojectionContext);
@@ -33,49 +32,49 @@ export const ReprojectionLayer = observer(({ item }) => {
       state.image !== item.name || state.index !== index ||
       state.width !== width || state.height !== height) return null;
 
-  // The active region selection is the single source of truth. Multi-select,
-  // deselection or selecting a non-keypoint hides all reprojection diagnostics.
-  const source = annotation?.regionStore?.selection?.highlighted;
-  if (!source || source.type !== "keypointregion" || source.hidden ||
-      source.labels?.length !== 1 || !item.regs.some((region) => region.id === source.id)) return null;
-  const jointName = normalizeJoint(source.labels[0]);
-  const joint = state.data.joints.find((candidate) => candidate.joint === jointName);
-  if (!joint) return null;
-
   const zoom = item.stageZoom;
   const viewScale = item.zoomScale;
   if (!Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(viewScale) || viewScale <= 0) return null;
 
-  // The editable Konva marker's radius uses a per-region canvasWidth and
-  // compensates for the top-level zoomScale. Using the selected source point
-  // on every camera was incorrect: each camera can have its own point size.
-  const regionForSlot = new Map();
+  // Only selection-dependent diagnostics (camera rays and displacement
+  // lines) depend on the highlighted region. Reprojections do not.
+  const selectedRegion = annotation?.regionStore?.selection?.highlighted;
+  const selectedJointName = selectedRegion?.type === "keypointregion" &&
+    !selectedRegion.hidden && selectedRegion.labels?.length === 1 &&
+    (selectedRegion.item_index ?? 0) === index &&
+    item.regs.some((region) => region.id === selectedRegion.id)
+    ? normalizeJoint(selectedRegion.labels[0])
+    : null;
+
+  // Index all real keypoints once so each camera gets its own reference
+  // size, native-pixel error, and existing 2D position. Reprojection of a
+  // joint without a region in a given camera uses the SAME joint in one
+  // of the other cameras for its fallback radius.
+  const regionsByJoint = new Map();
   for (const region of item.regs) {
     if (region.type !== "keypointregion" || region.hidden ||
-        region.labels?.length !== 1 || normalizeJoint(region.labels[0]) !== jointName ||
-        !Number.isFinite(region.x) || !Number.isFinite(region.y) ||
-        (region.item_index ?? 0) !== index) continue;
+        region.labels?.length !== 1 || !Number.isFinite(region.x) ||
+        !Number.isFinite(region.y) || (region.item_index ?? 0) !== index) continue;
+    const jointName = normalizeJoint(region.labels[0]);
     const slot = (region.y >= 50 ? 2 : 0) + (region.x >= 50 ? 1 : 0);
-    if (!regionForSlot.has(slot)) regionForSlot.set(slot, region);
+    if (!regionsByJoint.has(jointName)) regionsByJoint.set(jointName, new Map());
+    const bySlot = regionsByJoint.get(jointName);
+    if (!bySlot.has(slot)) bySlot.set(slot, region);
   }
+
   const pointRadius = (region) => {
     if (!region) return null;
-    // Prefer the exact Konva radius when already mounted, otherwise match
-    // HtxKeyPointView's formula without introducing another scale factor.
     const liveRadius = region.shapeRef?.radius?.();
+    // Match the editable KeyPointRegion's local radius and top-level zoom
+    // compensation; the entire Stage already owns zoomScale.
     const radius = Number.isFinite(liveRadius) && liveRadius > 0
       ? liveRadius : Math.max(region.canvasWidth, 2) / viewScale;
     return Number.isFinite(radius) && radius > 0 ? radius : null;
   };
-  const sourceRadius = pointRadius(source);
-  if (!sourceRadius) return null;
 
-  // Error is in calibration-image pixels, NOT screen pixels. The UI uses
-  // the same 10 px warning cutoff as the existing 3D quality diagnostics.
   const errorColor = (error) => {
-    if (!Number.isFinite(error)) return "#94a3b8"; // no labelled observation
+    if (!Number.isFinite(error)) return "#94a3b8";
     const t = Math.max(0, Math.min(1, error / 10));
-    // green -> yellow -> red (linear RGB, continuously interpolated).
     const start = t <= 0.5 ? [34, 197, 94] : [234, 179, 8];
     const end = t <= 0.5 ? [234, 179, 8] : [239, 68, 68];
     const alpha = t <= 0.5 ? t * 2 : (t - 0.5) * 2;
@@ -96,40 +95,50 @@ export const ReprojectionLayer = observer(({ item }) => {
   };
 
   const curves = [];
-  if (state.camerasEnabled) {
-    for (const ray of joint.ray_projections ?? []) {
-      if (!Array.isArray(ray.path) || ray.path.length < 2) continue;
-      const vertices = ray.path.map(([x, y]) => toMosaic(ray.target_slot, x, y)).filter(Boolean);
-      if (vertices.length < 2) continue;
-      // Lens distortion means the epipolar locus can be curved. Clip it
-      // within its destination camera quadrant to avoid crossing tiles.
-      curves.push(
-        <Group
-          key={`ray:${joint.joint}:${ray.source_slot}:${ray.target_slot}`}
-          clipX={(ray.target_slot % 2) * width * zoom / 2}
-          clipY={Math.floor(ray.target_slot / 2) * height * zoom / 2}
-          clipWidth={width * zoom / 2}
-          clipHeight={height * zoom / 2}
-          listening={false}
-        >
-          <Line
-            points={vertices.flat()}
-            stroke={cameraColorOf(ray.source_slot)}
-            strokeWidth={1.8}
-            opacity={0.75}
-            dash={[7, 5]}
-            lineCap="round"
-            strokeScaleEnabled={false}
-            perfectDrawEnabled={false}
-            listening={false}
-          />
-        </Group>,
-      );
-    }
-  }
-
   const projections = [];
-  if (state.enabled) {
+
+  for (const joint of state.data.joints) {
+    const isSelected = selectedJointName !== null && joint.joint === selectedJointName;
+
+    // The Cameras toggle never draws rays for unselected joints.
+    if (state.camerasEnabled && isSelected) {
+      for (const ray of joint.ray_projections ?? []) {
+        if (!Array.isArray(ray.path) || ray.path.length < 2) continue;
+        const vertices = ray.path.map(([x, y]) => toMosaic(ray.target_slot, x, y)).filter(Boolean);
+        if (vertices.length < 2) continue;
+        curves.push(
+          <Group
+            key={`ray:${joint.joint}:${ray.source_slot}:${ray.target_slot}`}
+            clipX={(ray.target_slot % 2) * width * zoom / 2}
+            clipY={Math.floor(ray.target_slot / 2) * height * zoom / 2}
+            clipWidth={width * zoom / 2}
+            clipHeight={height * zoom / 2}
+            listening={false}
+          >
+            <Line
+              points={vertices.flat()}
+              stroke={cameraColorOf(ray.source_slot)}
+              strokeWidth={1.8}
+              opacity={0.75}
+              dash={[7, 5]}
+              lineCap="round"
+              strokeScaleEnabled={false}
+              perfectDrawEnabled={false}
+              listening={false}
+            />
+          </Group>,
+        );
+      }
+    }
+
+    if (!state.enabled) continue;
+
+    const bySlot = regionsByJoint.get(joint.joint);
+    const fallbackRadius = pointRadius(bySlot?.values().next().value);
+    // Reconstruction needs observations from >=2 cameras, so a matching
+    // region should exist. Do not invent an arbitrary stage-based radius.
+    if (!fallbackRadius) continue;
+
     for (const point of joint.reprojections ?? []) {
       const pos = toMosaic(point.slot, point.x, point.y);
       if (!pos) continue;
@@ -139,13 +148,9 @@ export const ReprojectionLayer = observer(({ item }) => {
       if (x < tileX || x > tileX + width * zoom / 2 ||
           y < tileY || y > tileY + height * zoom / 2) continue;
 
-      const observed = regionForSlot.get(point.slot);
-      const radius = pointRadius(observed) ?? sourceRadius;
+      const observed = bySlot?.get(point.slot);
+      const radius = pointRadius(observed) ?? fallbackRadius;
       const camera = cameraBySlot.get(point.slot);
-      // Measure residuals for every camera with a 2D annotation, INCLUDING
-      // views excluded from triangulation. The reconstruction endpoint only
-      // reports residuals for contributing views, but this comparison uses
-      // the full original mosaic and native calibration image dimensions.
       const column = point.slot % 2;
       const row = Math.floor(point.slot / 2);
       const observedX = observed && camera
@@ -159,10 +164,11 @@ export const ReprojectionLayer = observer(({ item }) => {
         : NaN;
       const color = errorColor(errorPx);
 
-      // Draw the displacement between the actual annotation and the 3D
-      // projection, as in the reference image. Both ends use the same Konva
-      // stage coordinate system, so there is no extra zoom conversion.
-      if (observed && Number.isFinite(observed.canvasX) && Number.isFinite(observed.canvasY)) {
+      // Preserve the centre-to-centre diagnostic from the previous version,
+      // but show it only for the selected joint; showing every displacement
+      // vector at once makes a dense skeleton harder to inspect.
+      if (isSelected && observed &&
+          Number.isFinite(observed.canvasX) && Number.isFinite(observed.canvasY)) {
         projections.push(
           <Line
             key={`residual:${point.slot}:${joint.joint}`}
@@ -176,6 +182,7 @@ export const ReprojectionLayer = observer(({ item }) => {
           />,
         );
       }
+
       projections.push(
         <Circle
           key={`projection:${point.slot}:${joint.joint}`}
