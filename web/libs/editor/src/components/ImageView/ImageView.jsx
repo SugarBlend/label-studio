@@ -1486,7 +1486,6 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
       {isFF(FF_LSDV_4930) ? <TransformerBack item={item} /> : null}
 
       <SkeletonRelationsLayer item={item} />
-      <ReprojectionLayer item={item} />
 
       {renderableRegions.map(([groupName, list]) => {
         const useLayers = groupName.match(/brush/i) === null;
@@ -1505,6 +1504,10 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
           <Fragment key={groupName} />
         );
       })}
+      {/* Draw all residual vectors and dotted reprojections over skeleton bones
+          and original region shapes. Their layer has listening=false, so
+          dragging or selecting the underlying annotation still works. */}
+      <ReprojectionLayer item={item} />
       <Selection item={item} isPanning={state.isPanning} />
       <DrawingRegion item={item} />
       {item.smoothingEnabled === false && <PixelGridLayer item={item} />}
