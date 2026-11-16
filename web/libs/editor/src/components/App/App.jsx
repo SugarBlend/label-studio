@@ -2,6 +2,7 @@
  * Libraries
  */
 import React, { Component } from "react";
+import { reaction } from "mobx";
 import { Result, Spin } from "antd";
 import { getEnv, getRoot } from "mobx-state-tree";
 import { observer, Provider } from "mobx-react";
@@ -47,6 +48,9 @@ import { SideTabsPanels } from "../SidePanels/TabPanels/SideTabsPanels";
 import { TopBar } from "../TopBar/TopBar";
 import { ViewAll } from "./ViewAll";
 import { Skeleton3D } from "../Skeleton3D/Skeleton3D";
+import { adaptSkeleton, createFrameCache, createReconstructionRunner, readSkeletonSnapshot } from "../Skeleton3D/adapter";
+import { requestReconstruction } from "../Skeleton3D/request";
+import { ReprojectionContext } from "../Skeleton3D/ReprojectionContext";
 
 /**
  * Styles
@@ -75,12 +79,96 @@ class App extends Component {
   relationsRef = React.createRef();
   skeleton3dRef = React.createRef();
 
+
+  state = { reprojectionEnabled: false, reprojection: null };
+  reprojectionDisposer = null;
+  reprojectionRunner = null;
+  reprojectionCache = createFrameCache(8);
+  reprojectionTarget = null;
+
   onShow3D = () => this.skeleton3dRef.current?.show();
+
+  toggleReprojection = () => {
+    this.setState(({ reprojectionEnabled }) => ({
+      reprojectionEnabled: !reprojectionEnabled,
+      reprojection: null,
+    }), () => {
+      if (this.state.reprojectionEnabled) this.startReprojection();
+      else this.stopReprojection();
+    });
+  };
+
+  startReprojection = () => {
+    this.stopReprojection();
+    const { store } = this.props;
+    const config = getEnv(store).skeleton3d;
+    if (!config?.enabled || !Array.isArray(config.cameras)) return;
+    const settings = JSON.parse(JSON.stringify(config));
+    this.reprojectionRunner = createReconstructionRunner({
+      request: requestReconstruction,
+      cache: this.reprojectionCache,
+      fastDelay: 35,
+      delay: 280,
+      minInterval: 250,
+      onState: (next) => {
+        const target = this.reprojectionTarget;
+        if (!this.state.reprojectionEnabled || !target) return;
+        const reprojection = next.status === "ready" && next.data?.joints?.length
+          ? { ...target, data: next.data, cameras: settings.cameras }
+          : null;
+        this.setState({ reprojection });
+      },
+    });
+
+    this.reprojectionDisposer = reaction(
+      () => JSON.stringify(readSkeletonSnapshot(store)),
+      (serialized) => {
+        const snapshot = JSON.parse(serialized);
+        const active = store.annotationStore?.selected;
+        const first = snapshot.points[0];
+        const sameAnnotation = active && snapshot.annotation === active.id;
+        const sameImage = first && snapshot.points.every(
+          (point) => point.image === first.image && point.index === first.index,
+        );
+        this.reprojectionTarget = sameAnnotation && sameImage ? {
+          task: snapshot.task, annotation: snapshot.annotation,
+          image: first.image, index: first.index,
+          width: first.width, height: first.height,
+        } : null;
+        if (!this.reprojectionTarget) {
+          this.reprojectionRunner?.update({
+            error: "No active annotated mosaic", task: snapshot.task,
+            annotation: snapshot.annotation, config: settings, observations: [], edges: [],
+          });
+          return;
+        }
+        this.reprojectionRunner?.update({
+          ...adaptSkeleton(snapshot, settings),
+          config: settings, task: snapshot.task, annotation: snapshot.annotation,
+        });
+      },
+      { fireImmediately: true },
+    );
+  };
+
+  stopReprojection = () => {
+    this.reprojectionDisposer?.();
+    this.reprojectionDisposer = null;
+    this.reprojectionRunner?.dispose();
+    this.reprojectionRunner = null;
+    this.reprojectionTarget = null;
+    if (this.state.reprojection !== null) this.setState({ reprojection: null });
+  };
+
 
   componentDidMount() {
     // Hack to activate app hotkeys
     window.blur();
     document.body.focus();
+  }
+
+  componentWillUnmount() {
+    this.stopReprojection();
   }
 
   renderSuccess() {
@@ -266,6 +354,7 @@ class App extends Component {
         className={cn("editor").mod({ fullscreen: settings.fullscreen }).toClassName()}
         ref={isFF(FF_LSDV_4620_3_ML) ? reactCleaner(this) : null}
       >
+        <ReprojectionContext.Provider value={{ enabled: this.state.reprojectionEnabled, ...this.state.reprojection }}>
         <QueryClientProvider client={queryClient}>
           <Settings store={store} />
           <Provider store={store}>
@@ -296,7 +385,7 @@ class App extends Component {
                 {isBulkMode || !store.hasInterface("side-column") || !as.selected ? (
                   <>
                     {mainContent}
-                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} onToggleReprojection={skeletonEnabled ? this.toggleReprojection : undefined} reprojectionEnabled={this.state.reprojectionEnabled} />}
                   </>
                 ) : (
                   <SideTabsPanels
@@ -308,7 +397,7 @@ class App extends Component {
                     focusTab={store.commentStore.tooltipMessage ? "comments" : null}
                   >
                     {mainContent}
-                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} />}
+                    {!store.isLoading && root && store.hasInterface("topbar") && <BottomBar store={store} onShow3D={skeletonEnabled ? this.onShow3D : undefined} onToggleReprojection={skeletonEnabled ? this.toggleReprojection : undefined} reprojectionEnabled={this.state.reprojectionEnabled} />}
                   </SideTabsPanels>
                 )}
               </div>
@@ -317,6 +406,7 @@ class App extends Component {
           </Provider>
           {store.hasInterface("debug") && <Debug store={store} />}
         </QueryClientProvider>
+        </ReprojectionContext.Provider>
       </div>
     );
   }
