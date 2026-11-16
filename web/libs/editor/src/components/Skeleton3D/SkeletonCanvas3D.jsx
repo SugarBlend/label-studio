@@ -153,11 +153,25 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
     }
   }
 
-  if (options.cameras || options.rays) {
+  if (options.cameras || options.rays || options.externalCameraRays) {
     for (const camera of config?.cameras || []) {
       const centre = cameraCentre(camera.calibration);
       if (!centre) continue;
       const projectedCamera = pt(world(centre));
+      if (options.externalCameraRays) {
+        for (const joint of joints) {
+          for (const ray of joint.camera_rays ?? []) {
+            if (ray.slot !== camera.slot || !finite(ray.origin) || !finite(ray.direction)) continue;
+            // The observed 2D pixel defines a true back-projection ray,
+            // which can miss the triangulated 3D joint with noisy labels.
+            const distance = dot(sub(joint.position, ray.origin), ray.direction);
+            if (distance <= 0) continue;
+            const start = pt(world(ray.origin));
+            const end = pt(world(add(ray.origin, mul(ray.direction, distance))));
+            line(start, end, colorOf(joint.joint), 0.9, 0.14);
+          }
+        }
+      }
       // Rays are only meaningful for a selected reconstructed joint.
       // Show that joint's camera-centre rays in calibrated world coordinates.
       if (options.rays && selectedJoint && projected.has(selectedJoint)) {
@@ -166,7 +180,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
           line(projectedCamera, projected.get(selectedJoint), "#d39b3f", 1.8, 0.85);
         }
       }
-      if (options.cameras) {
+      if (options.cameras || options.externalCameraRays) {
         const p = projectedCamera;
         ctx.fillStyle = "#48556d";
         ctx.strokeStyle = "#f7f9fd";
@@ -292,7 +306,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
 export function SkeletonCanvas3D({
   data, config, docked = false, detached = false, history = [],
   controlledView, onChangeView, controlledOptions, onChangeOptions,
-  controlledSelectedJoint, onChangeSelectedJoint,
+  controlledSelectedJoint, onChangeSelectedJoint, externalCamerasEnabled = false,
 }) {
   const canvas = useRef(null);
   const drag = useRef(null);
@@ -307,7 +321,10 @@ export function SkeletonCanvas3D({
   const [dimensions, setDimensions] = useState(0);
   const view = controlledView ?? internalView;
   const setView = onChangeView ?? setInternalView;
-  const options = controlledOptions ?? internalOptions;
+  const options = {
+    ...(controlledOptions ?? internalOptions),
+    externalCameraRays: externalCamerasEnabled,
+  };
   const setOptions = onChangeOptions ?? setInternalOptions;
   const selectedJoint = controlledSelectedJoint === undefined ? internalSelectedJoint : controlledSelectedJoint;
   const setSelectedJoint = onChangeSelectedJoint ?? setInternalSelectedJoint;
