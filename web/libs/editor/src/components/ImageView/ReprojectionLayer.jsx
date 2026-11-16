@@ -4,15 +4,15 @@ import { Circle, Group, Layer, Line } from "react-konva";
 import { ReprojectionContext } from "../Skeleton3D/ReprojectionContext";
 import { normalizeJoint } from "../Skeleton3D/adapter";
 import { cameraColorOf } from "../Skeleton3D/topology";
-import { getRegionStyles } from "../../hooks/useRegionColor";
+
 
 /**
  * Read-only reprojection diagnostics for ONE actively selected 2D keypoint.
  *
- * The marker mirrors that region's actual canvas radius and Label Studio
- * fill/stroke/opacity rules (KeyPointRegion.jsx/useRegionColor.ts). There
- * is no hard-coded 8px size, 0.4 opacity, or tiny fallback radius.
- * The dotted outline distinguishes a projected point from a saved region.
+ * Markers use per-camera point sizes with a dotted unfilled outline. The
+ * colour indicates the measured 2D reprojection residual in calibration
+ * pixels (green at 0, yellow at 5, red at 10+ pixels). No annotation in a
+ * target camera means there is no measurable residual: draw a neutral ring.
  *
  * The 2D camera rays are epipolar curves generated from the actual observed
  * camera rays; line colour identifies the source camera. None of these
@@ -46,26 +46,42 @@ export const ReprojectionLayer = observer(({ item }) => {
   const viewScale = item.zoomScale;
   if (!Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(viewScale) || viewScale <= 0) return null;
 
-  // Prefer the visible source Konva circle when available. This is the
-  // exact radius displayed in Label Studio. Otherwise use the identical
-  // KeyPointRegion formula, never an unrelated stage-width fallback.
-  const renderedRadius = source.shapeRef?.radius?.();
-  const radius = Number.isFinite(renderedRadius) && renderedRadius > 0
-    ? renderedRadius
-    : Math.max(source.canvasWidth, 2) / viewScale;
-  if (!Number.isFinite(radius) || radius <= 0) return null;
+  // The editable Konva marker's radius uses a per-region canvasWidth and
+  // compensates for the top-level zoomScale. Using the selected source point
+  // on every camera was incorrect: each camera can have its own point size.
+  const regionForSlot = new Map();
+  for (const region of item.regs) {
+    if (region.type !== "keypointregion" || region.hidden ||
+        region.labels?.length !== 1 || normalizeJoint(region.labels[0]) !== jointName ||
+        !Number.isFinite(region.x) || !Number.isFinite(region.y) ||
+        (region.item_index ?? 0) !== index) continue;
+    const slot = (region.y >= 50 ? 2 : 0) + (region.x >= 50 ? 1 : 0);
+    if (!regionForSlot.has(slot)) regionForSlot.set(slot, region);
+  }
+  const pointRadius = (region) => {
+    if (!region) return null;
+    // Prefer the exact Konva radius when already mounted, otherwise match
+    // HtxKeyPointView's formula without introducing another scale factor.
+    const liveRadius = region.shapeRef?.radius?.();
+    const radius = Number.isFinite(liveRadius) && liveRadius > 0
+      ? liveRadius : Math.max(region.canvasWidth, 2) / viewScale;
+    return Number.isFinite(radius) && radius > 0 ? radius : null;
+  };
+  const sourceRadius = pointRadius(source);
+  if (!sourceRadius) return null;
 
-  // Use exactly the same style resolution as HtxKeyPointView, including
-  // KeyPointLabels/KeyPoint opacity, fillcolor and strokecolor from config.
-  // Alpha is embedded in fillColor; do not multiply it by a second opacity.
-  const regionStyles = getRegionStyles({
-    region: source,
-    shouldFill: true,
-    defaultFillColor: "#000",
-    defaultStrokeColor: "#fff",
-    defaultOpacity: (source.style ?? source.tag) ? 0.6 : 1,
-    sameStrokeWidthForSelected: true,
-  });
+  // Error is in calibration-image pixels, NOT screen pixels. The UI uses
+  // the same 10 px warning cutoff as the existing 3D quality diagnostics.
+  const errorColor = (error) => {
+    if (!Number.isFinite(error)) return "#94a3b8"; // no labelled observation
+    const t = Math.max(0, Math.min(1, error / 10));
+    // green -> yellow -> red (linear RGB, continuously interpolated).
+    const start = t <= 0.5 ? [34, 197, 94] : [234, 179, 8];
+    const end = t <= 0.5 ? [234, 179, 8] : [239, 68, 68];
+    const alpha = t <= 0.5 ? t * 2 : (t - 0.5) * 2;
+    return "#" + start.map((v, i) => Math.round(v + (end[i] - v) * alpha)
+      .toString(16).padStart(2, "0")).join("");
+  };
 
   const cameras = state.cameras ?? [];
   const cameraBySlot = new Map(cameras.map((camera) => [camera.slot, camera]));
@@ -114,6 +130,10 @@ export const ReprojectionLayer = observer(({ item }) => {
 
   const projections = [];
   if (state.enabled) {
+    const errorBySlot = new Map((joint.reprojection_errors ?? []).map(
+      ({ slot, error_px }) => [slot, error_px],
+    ));
+
     for (const point of joint.reprojections ?? []) {
       const pos = toMosaic(point.slot, point.x, point.y);
       if (!pos) continue;
@@ -123,16 +143,37 @@ export const ReprojectionLayer = observer(({ item }) => {
       if (x < tileX || x > tileX + width * zoom / 2 ||
           y < tileY || y > tileY + height * zoom / 2) continue;
 
+      const observed = regionForSlot.get(point.slot);
+      const radius = pointRadius(observed) ?? sourceRadius;
+      const color = errorColor(errorBySlot.get(point.slot));
+
+      // Draw the displacement between the actual annotation and the 3D
+      // projection, as in the reference image. Both ends use the same Konva
+      // stage coordinate system, so there is no extra zoom conversion.
+      if (observed && Number.isFinite(observed.canvasX) && Number.isFinite(observed.canvasY)) {
+        projections.push(
+          <Line
+            key={`residual:${point.slot}:${joint.joint}`}
+            points={[observed.canvasX, observed.canvasY, x, y]}
+            stroke={color}
+            strokeWidth={1.8}
+            opacity={0.9}
+            strokeScaleEnabled={false}
+            perfectDrawEnabled={false}
+            listening={false}
+          />,
+        );
+      }
       projections.push(
         <Circle
           key={`projection:${point.slot}:${joint.joint}`}
           x={x}
           y={y}
           radius={radius}
-          fill={regionStyles.fillColor}
-          stroke={regionStyles.strokeColor}
-          strokeWidth={Math.max(1, regionStyles.strokeWidth)}
-          dash={[2, 3]}
+          stroke={color}
+          strokeWidth={2}
+          dash={[3, 3]}
+          fillEnabled={false}
           strokeScaleEnabled={false}
           perfectDrawEnabled={false}
           listening={false}
