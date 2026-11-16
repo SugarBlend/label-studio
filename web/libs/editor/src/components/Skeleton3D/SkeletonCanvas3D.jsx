@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BONE, LEFT, RIGHT, colorOf, sideOf, standardEdges } from "./topology";
+import { BONE, LEFT, RIGHT, cameraColorOf, colorOf, sideOf, standardEdges } from "./topology";
 import { hasHighReprojectionError } from "./reprojectionQuality";
 
 const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -158,8 +158,8 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
       const centre = cameraCentre(camera.calibration);
       if (!centre) continue;
       const projectedCamera = pt(world(centre));
-      if (options.externalCameraRays) {
-        for (const joint of joints) {
+      if (options.externalCameraRays && selectedJoint) {
+        for (const joint of joints.filter((candidate) => candidate.joint === selectedJoint)) {
           for (const ray of joint.camera_rays ?? []) {
             if (ray.slot !== camera.slot || !finite(ray.origin) || !finite(ray.direction)) continue;
             // The observed 2D pixel defines a true back-projection ray,
@@ -168,7 +168,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
             if (distance <= 0) continue;
             const start = pt(world(ray.origin));
             const end = pt(world(add(ray.origin, mul(ray.direction, distance))));
-            line(start, end, colorOf(joint.joint), 0.9, 0.14);
+            line(start, end, cameraColorOf(camera.slot), 2.1, 0.78);
           }
         }
       }
@@ -177,12 +177,12 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
       if (options.rays && selectedJoint && projected.has(selectedJoint)) {
         const selected = joints.find((joint) => joint.joint === selectedJoint);
         if (selected?.views?.includes(camera.slot)) {
-          line(projectedCamera, projected.get(selectedJoint), "#d39b3f", 1.8, 0.85);
+          line(projectedCamera, projected.get(selectedJoint), cameraColorOf(camera.slot), 2.1, 0.9);
         }
       }
       if (options.cameras || options.externalCameraRays) {
         const p = projectedCamera;
-        ctx.fillStyle = "#48556d";
+        ctx.fillStyle = cameraColorOf(camera.slot);
         ctx.strokeStyle = "#f7f9fd";
         ctx.lineWidth = 1.4;
         ctx.beginPath();
