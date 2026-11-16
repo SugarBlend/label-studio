@@ -27,6 +27,7 @@ const readPanelState = () => {
 export const Skeleton3D = React.forwardRef(function Skeleton3D({
   store, config, docked = false, popupOnly = false, externalCamerasEnabled = false,
   controlledEnabledCameraSlots, onChangeEnabledCameraSlots,
+  controlledSelectedJoint, onChangeSelectedJoint,
 }, ref) {
   const [state, setState] = useState({ status: "pending", data: null });
   // Temporary in-memory reconstruction history for the Trail / Path toggles.
@@ -61,7 +62,9 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({
     labelNames: false, cameras: false, rays: false,
     shadow: true, trail: false, path: false, soles: true,
   });
-  const [selectedJoint, setSelectedJoint] = useState(null);
+  const [localSelectedJoint, setLocalSelectedJoint] = useState(null);
+  const selectedJoint = controlledSelectedJoint === undefined ? localSelectedJoint : controlledSelectedJoint;
+  const setSelectedJoint = onChangeSelectedJoint ?? setLocalSelectedJoint;
   const [sourceId, setSourceId] = useState("auto");
   const [availableSources, setAvailableSources] = useState([]);
   // Camera selection is session-only. In Label Studio the parent App owns it
