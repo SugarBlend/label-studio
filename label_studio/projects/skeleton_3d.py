@@ -233,8 +233,29 @@ def reconstruct(config, observations):
                 errors.append({'slot': slot, 'error_px': error})
             if not np.isfinite(position).all() or not all(np.isfinite(e['error_px']) for e in errors):
                 raise ValueError('Nonfinite reconstruction')
+
+            # Project every reconstructed 3D joint into all calibrated camera
+            # views, including views with no annotated observation. Use the
+            # same distortion model as reconstruction and reprojection error.
+            reprojections = []
+            for camera_slot, (camera_K, camera_R, camera_t, camera_d) in parameters.items():
+                camera_point = camera_R @ position + camera_t
+                if camera_point[2] <= 1e-10:
+                    continue
+                try:
+                    projected = camera_K @ np.array([
+                        *distort(camera_point[:2] / camera_point[2], camera_d), 1
+                    ])
+                except ValueError:
+                    continue
+                x, y = projected[:2]
+                camera = cameras[camera_slot]
+                if (np.isfinite(x) and np.isfinite(y) and
+                        0 <= x <= camera['image_width'] and 0 <= y <= camera['image_height']):
+                    reprojections.append({'slot': camera_slot, 'x': float(x), 'y': float(y)})
+
             joints.append({'joint': joint, 'position': position.tolist(), 'views': list(group),
-                           'reprojection_errors': errors,
+                           'reprojection_errors': errors, 'reprojections': reprojections,
                            'rms_reprojection_error_px': float(np.hypot.reduce([e['error_px'] for e in errors]) / np.sqrt(len(errors)))})
             if joints[-1]['rms_reprojection_error_px'] > 10:
                 warnings.append(f'{joint}: RMS reprojection error exceeds 10 px; check observations and calibration.')
