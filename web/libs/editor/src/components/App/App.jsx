@@ -80,13 +80,27 @@ class App extends Component {
   skeleton3dRef = React.createRef();
 
 
-  state = { reprojectionEnabled: false, camerasEnabled: false, reprojection: null };
+  state = { reprojectionEnabled: false, camerasEnabled: false, triangulationCameraSlots: [0, 1, 2, 3], reprojection: null };
   reprojectionDisposer = null;
   reprojectionRunner = null;
   reprojectionCache = createFrameCache(8);
   reprojectionTarget = null;
 
   onShow3D = () => this.skeleton3dRef.current?.show();
+
+  // Shared source of truth for both the detached 3D window and the 2D
+  // reprojection runner. Camera exclusion affects triangulation only;
+  // the backend still projects reconstructed joints to all four views.
+  setTriangulationCameraSlots = (slots) => {
+    if (!Array.isArray(slots)) return;
+    const unique = [...new Set(slots.filter((slot) => Number.isInteger(slot) && slot >= 0 && slot < 4))]
+      .sort((a, b) => a - b);
+    if (unique.join(",") === this.state.triangulationCameraSlots.join(",")) return;
+
+    this.setState({ triangulationCameraSlots: unique, reprojection: null }, () => {
+      if (this.state.reprojectionEnabled || this.state.camerasEnabled) this.startReprojection();
+    });
+  };
 
   toggleReprojection = () => {
     this.setState(({ reprojectionEnabled }) => ({
@@ -150,7 +164,7 @@ class App extends Component {
           return;
         }
         this.reprojectionRunner?.update({
-          ...adaptSkeleton(snapshot, settings),
+          ...adaptSkeleton(snapshot, settings, this.state.triangulationCameraSlots),
           config: settings, task: snapshot.task, annotation: snapshot.annotation,
         });
       },
@@ -378,7 +392,15 @@ class App extends Component {
               {/* The 3D viewer stays mounted here across frame changes, while
                   its Show 3D button is rendered next to Submit/Update in BottomBar. */}
               {skeletonEnabled && (
-                <Skeleton3D ref={this.skeleton3dRef} store={store} config={getEnv(store).skeleton3d} popupOnly externalCamerasEnabled={this.state.camerasEnabled} />
+                <Skeleton3D
+                  ref={this.skeleton3dRef}
+                  store={store}
+                  config={getEnv(store).skeleton3d}
+                  popupOnly
+                  externalCamerasEnabled={this.state.camerasEnabled}
+                  controlledEnabledCameraSlots={this.state.triangulationCameraSlots}
+                  onChangeEnabledCameraSlots={this.setTriangulationCameraSlots}
+                />
               )}
               <div
                 className={cn("wrapper")
