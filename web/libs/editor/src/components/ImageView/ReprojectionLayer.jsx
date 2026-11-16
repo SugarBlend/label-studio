@@ -9,8 +9,8 @@ import { cameraColorOf } from "../Skeleton3D/topology";
  * Read-only 2D reconstruction diagnostics:
  * - Show Reprojection: all triangulated joints in all calibrated cameras.
  * - Cameras: epipolar curves for the one selected keypoint only.
- * - Residual displacement lines: the selected keypoint only, to avoid
- *   clutter when showing the whole skeleton.
+ * - Residual displacement lines: for all annotated keypoints with a
+ *   corresponding 3D projection, regardless of selection.
  *
  * Reprojection rings are unfilled, coloured by each camera's native-pixel
  * residual (green 0px, yellow 5px, red >=10px, gray if unannotated).
@@ -36,8 +36,8 @@ export const ReprojectionLayer = observer(({ item }) => {
   const viewScale = item.zoomScale;
   if (!Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(viewScale) || viewScale <= 0) return null;
 
-  // Only selection-dependent diagnostics (camera rays and displacement
-  // lines) depend on the highlighted region. Reprojections do not.
+  // Camera rays are selection-dependent. Reprojection markers AND residual
+  // displacement vectors do not depend on an active selection.
   const selectedRegion = annotation?.regionStore?.selection?.highlighted;
   const selectedJointName = selectedRegion?.type === "keypointregion" &&
     !selectedRegion.hidden && selectedRegion.labels?.length === 1 &&
@@ -164,18 +164,21 @@ export const ReprojectionLayer = observer(({ item }) => {
         : NaN;
       const color = errorColor(errorPx);
 
-      // Preserve the centre-to-centre diagnostic from the previous version,
-      // but show it only for the selected joint; showing every displacement
-      // vector at once makes a dense skeleton harder to inspect.
-      if (isSelected && observed &&
+      // Always join the actual annotation centre with its projection.
+      // Both endpoints are expressed in unzoomed stage coordinates; the
+      // parent Konva Stage applies zoom to the entire read-only layer.
+      // For a zero-error projection the line has zero length, correctly
+      // indicating that both centres coincide.
+      if (observed &&
           Number.isFinite(observed.canvasX) && Number.isFinite(observed.canvasY)) {
         projections.push(
           <Line
             key={`residual:${point.slot}:${joint.joint}`}
             points={[observed.canvasX, observed.canvasY, x, y]}
             stroke={color}
-            strokeWidth={1.8}
-            opacity={0.9}
+            strokeWidth={2}
+            opacity={1}
+            lineCap="round"
             strokeScaleEnabled={false}
             perfectDrawEnabled={false}
             listening={false}
