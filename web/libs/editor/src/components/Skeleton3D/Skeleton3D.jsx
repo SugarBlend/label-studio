@@ -24,7 +24,7 @@ const readPanelState = () => {
 };
 
 /** Floating read-only window: the 3D view stays visible next to the mosaic while labelling. */
-export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, docked = false, popupOnly = false }, ref) {
+export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, docked = false, popupOnly = false, externalCamerasEnabled = false }, ref) {
   const [state, setState] = useState({ status: "pending", data: null });
   // Temporary in-memory reconstruction history for the Trail / Path toggles.
   // No points or trajectories are saved into the Label Studio annotations.
@@ -314,6 +314,7 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
             detached={Boolean(popout)} history={history.current}
             controlledView={sceneView} onChangeView={setSceneView}
             controlledOptions={sceneOptions} onChangeOptions={setSceneOptions}
+             externalCamerasEnabled={externalCamerasEnabled}
             controlledSelectedJoint={selectedJoint} onChangeSelectedJoint={setSelectedJoint} />
           </div>
           {/* Status, sources and quality notices have a fixed-height, scrollable
