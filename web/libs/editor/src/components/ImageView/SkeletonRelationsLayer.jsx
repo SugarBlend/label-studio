@@ -1,6 +1,5 @@
 import { observer } from "mobx-react";
 import { Layer, Line } from "react-konva";
-import { getRegionStyles } from "../../hooks/useRegionColor";
 
 /**
  * Renders manually-created Relations between two KeyPointLabels regions as
@@ -34,20 +33,6 @@ import { getRegionStyles } from "../../hooks/useRegionColor";
  */
 const isKeypointRegion = (region) => region?.type === "keypointregion";
 
-/**
- * Match the visible keypoint's fill color, including the Label Studio
- * configuration's fillcolor and opacity. This is the same style calculation
- * used by HtxKeyPointView, rather than a separate hard-coded skeleton palette.
- */
-const keypointFillColor = (region) => getRegionStyles({
-  region,
-  shouldFill: true,
-  defaultFillColor: "#000",
-  defaultStrokeColor: "#fff",
-  defaultOpacity: (region.style ?? region.tag) ? 0.6 : 1,
-  sameStrokeWidthForSelected: true,
-}).fillColor ?? "#000";
-
 const SkeletonRelationsLayer = observer(({ item }) => {
   const annotation = item.annotation;
 
@@ -71,29 +56,14 @@ const SkeletonRelationsLayer = observer(({ item }) => {
     if (node1.hidden || node2.hidden) return null;
     if (!node1.inViewPort || !node2.inViewPort) return null;
 
-    const x1 = node1.canvasX;
-    const y1 = node1.canvasY;
-    const x2 = node2.canvasX;
-    const y2 = node2.canvasY;
-    if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
-
-    const fromColor = keypointFillColor(node1);
-    const toColor = keypointFillColor(node2);
     const isHighlighted = highlighted === relation;
     const dimmed = !!highlighted && !isHighlighted;
-    const hasLength = Math.hypot(x2 - x1, y2 - y1) > 0.001;
 
     return (
       <Line
         key={relation.id}
-        points={[x1, y1, x2, y2]}
-        stroke={fromColor}
-        // A single relation blends from the colour of the first keypoint
-        // to that of the second. The gradient follows the moving endpoints.
-        // For coincident points, fall back to a solid colour.
-        strokeLinearGradientStartPoint={hasLength ? { x: x1, y: y1 } : undefined}
-        strokeLinearGradientEndPoint={hasLength ? { x: x2, y: y2 } : undefined}
-        strokeLinearGradientColorStops={hasLength ? [0, fromColor, 1, toColor] : undefined}
+        points={[node1.canvasX, node1.canvasY, node2.canvasX, node2.canvasY]}
+        stroke={isHighlighted ? "#fa541c" : "#00E5FF"}
         strokeWidth={isHighlighted ? 3 : 2}
         strokeScaleEnabled={false}
         opacity={dimmed ? 0.2 : 1}
