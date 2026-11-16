@@ -69,8 +69,8 @@ const ControlButton = observer(({ button, disabled, onClick, variant, look }: Co
   );
 });
 
-export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?: () => void; onToggleReprojection?: () => void; reprojectionEnabled?: boolean }>(
-  observer(({ store, history, annotation, onShow3D, onToggleReprojection, reprojectionEnabled }) => {
+export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?: () => void; onToggleReprojection?: () => void; reprojectionEnabled?: boolean; onToggleCameras?: () => void; camerasEnabled?: boolean }>(
+  observer(({ store, history, annotation, onShow3D, onToggleReprojection, reprojectionEnabled, onToggleCameras, camerasEnabled }) => {
     const isReview = store.hasInterface("review") || annotation.canBeReviewed;
     const isNotQuickView = store.hasInterface("topbar:prevnext");
     const historySelected = isDefined(store.annotationStore.selectedHistory);
@@ -183,8 +183,23 @@ export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?:
       </Button>
     ) : null;
 
+    const camerasButton = onToggleCameras ? (
+      <Button
+        key="camera-rays"
+        aria-label={camerasEnabled ? "Hide Cameras" : "Show Cameras"}
+        data-testid="bottombar-cameras-button"
+        variant="neutral"
+        look="outlined"
+        className="w-[130px]"
+        tooltip="Toggle 3D camera rays and 2D epipolar curves"
+        onClick={onToggleCameras}
+      >
+        Cameras
+      </Button>
+    ) : null;
+
     if (buttonsReplacement) {
-      return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}{reprojectionButton}</div>;
+      return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}{reprojectionButton}{camerasButton}</div>;
     }
 
     if (isReview) {
@@ -380,6 +395,6 @@ export const Controls = controlsInjector<{ annotation: MSTAnnotation; onShow3D?:
       }
     }
 
-    return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}{reprojectionButton}</div>;
+    return <div className={cn("controls").toClassName()}>{buttons}{show3DButton}{reprojectionButton}{camerasButton}</div>;
   }),
 );
