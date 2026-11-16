@@ -24,7 +24,10 @@ const readPanelState = () => {
 };
 
 /** Floating read-only window: the 3D view stays visible next to the mosaic while labelling. */
-export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, docked = false, popupOnly = false, externalCamerasEnabled = false }, ref) {
+export const Skeleton3D = React.forwardRef(function Skeleton3D({
+  store, config, docked = false, popupOnly = false, externalCamerasEnabled = false,
+  controlledEnabledCameraSlots, onChangeEnabledCameraSlots,
+}, ref) {
   const [state, setState] = useState({ status: "pending", data: null });
   // Temporary in-memory reconstruction history for the Trail / Path toggles.
   // No points or trajectories are saved into the Label Studio annotations.
@@ -61,9 +64,19 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({ store, config, 
   const [selectedJoint, setSelectedJoint] = useState(null);
   const [sourceId, setSourceId] = useState("auto");
   const [availableSources, setAvailableSources] = useState([]);
-  // Local to this open 3D viewer; camera selection is not saved in project
-  // calibration or 2D annotations, and survives navigation between frames.
-  const [enabledCameraSlots, setEnabledCameraSlots] = useState([0, 1, 2, 3]);
+  // Camera selection is session-only. In Label Studio the parent App owns it
+  // so that excluding a view updates both 3D reconstruction and 2D projections.
+  // The local fallback supports standalone or embedded 3D viewers.
+  const [localEnabledCameraSlots, setLocalEnabledCameraSlots] = useState([0, 1, 2, 3]);
+  const enabledCameraSlots = controlledEnabledCameraSlots ?? localEnabledCameraSlots;
+  const setEnabledCameraSlots = (update) => {
+    const next = typeof update === "function" ? update(enabledCameraSlots) : update;
+    if (controlledEnabledCameraSlots !== undefined) {
+      onChangeEnabledCameraSlots?.(next);
+    } else {
+      setLocalEnabledCameraSlots(next);
+    }
+  };
   const enabledCameraKey = enabledCameraSlots.join(",");
   const currentTaskRef = useRef(null);
   useEffect(() => {
