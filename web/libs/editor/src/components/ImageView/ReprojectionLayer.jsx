@@ -14,7 +14,8 @@ import { cameraColorOf } from "../Skeleton3D/topology";
  *
  * Reprojection rings are unfilled, coloured by each camera's native-pixel
  * residual (green 0px, yellow 5px, red >=10px, gray if unannotated).
- * Markers use the radius of the corresponding original 2D region.
+ * Markers use the radius of their original 2D region, or the nearest
+ * visible point in the same camera if the original point was deleted.
  * No shape here is interactive or stored in an annotation.
  */
 export const ReprojectionLayer = observer(({ item }) => {
@@ -51,6 +52,7 @@ export const ReprojectionLayer = observer(({ item }) => {
   // joint without a region in a given camera uses the SAME joint in one
   // of the other cameras for its fallback radius.
   const regionsByJoint = new Map();
+  const visibleRegionsByCamera = [[], [], [], []];
   for (const region of item.regs) {
     if (region.type !== "keypointregion" || region.hidden ||
         region.labels?.length !== 1 || !Number.isFinite(region.x) ||
@@ -60,6 +62,7 @@ export const ReprojectionLayer = observer(({ item }) => {
     if (!regionsByJoint.has(jointName)) regionsByJoint.set(jointName, new Map());
     const bySlot = regionsByJoint.get(jointName);
     if (!bySlot.has(slot)) bySlot.set(slot, region);
+    visibleRegionsByCamera[slot].push(region);
   }
 
   const pointRadius = (region) => {
@@ -70,6 +73,35 @@ export const ReprojectionLayer = observer(({ item }) => {
     const radius = Number.isFinite(liveRadius) && liveRadius > 0
       ? liveRadius : Math.max(region.canvasWidth, 2) / viewScale;
     return Number.isFinite(radius) && radius > 0 ? radius : null;
+  };
+
+  // When a joint is missing in a camera, its deleted KeyPointRegion no
+  // longer exists in MobX and therefore no longer has a reliable width.
+  // Infer the marker size from the NEAREST surviving point in that camera.
+  // If that camera has no points at all, use the median displayed radius
+  // across the other cameras. Never borrow the corresponding joint's
+  // potentially very different width from another camera.
+  const globalRadii = visibleRegionsByCamera.flat()
+    .map(pointRadius).filter((radius) => radius !== null).sort((a, b) => a - b);
+  const median = (values) => values[Math.floor(values.length / 2)] ?? null;
+  const globalFallbackRadius = median(globalRadii);
+
+  const missingPointRadius = (slot, x, y) => {
+    const candidates = visibleRegionsByCamera[slot] ?? [];
+    let nearest = null;
+    let nearestSquaredDistance = Infinity;
+    for (const region of candidates) {
+      const dx = region.canvasX - x;
+      const dy = region.canvasY - y;
+      const radius = pointRadius(region);
+      if (!Number.isFinite(dx) || !Number.isFinite(dy) || radius === null) continue;
+      const squaredDistance = dx * dx + dy * dy;
+      if (squaredDistance < nearestSquaredDistance) {
+        nearest = radius;
+        nearestSquaredDistance = squaredDistance;
+      }
+    }
+    return nearest ?? globalFallbackRadius;
   };
 
   const errorColor = (error) => {
@@ -134,10 +166,6 @@ export const ReprojectionLayer = observer(({ item }) => {
     if (!state.enabled) continue;
 
     const bySlot = regionsByJoint.get(joint.joint);
-    const fallbackRadius = pointRadius(bySlot?.values().next().value);
-    // Reconstruction needs observations from >=2 cameras, so a matching
-    // region should exist. Do not invent an arbitrary stage-based radius.
-    if (!fallbackRadius) continue;
 
     for (const point of joint.reprojections ?? []) {
       const pos = toMosaic(point.slot, point.x, point.y);
@@ -149,7 +177,8 @@ export const ReprojectionLayer = observer(({ item }) => {
           y < tileY || y > tileY + height * zoom / 2) continue;
 
       const observed = bySlot?.get(point.slot);
-      const radius = pointRadius(observed) ?? fallbackRadius;
+      const radius = pointRadius(observed) ?? missingPointRadius(point.slot, x, y);
+      if (radius === null) continue;
       const camera = cameraBySlot.get(point.slot);
       const column = point.slot % 2;
       const row = Math.floor(point.slot / 2);
