@@ -254,8 +254,59 @@ def reconstruct(config, observations):
                         0 <= x <= camera['image_width'] and 0 <= y <= camera['image_height']):
                     reprojections.append({'slot': camera_slot, 'x': float(x), 'y': float(y)})
 
+            # A measured pixel defines a 3D ray (camera center + undistorted
+            # unit direction), not necessarily the line to the triangulated
+            # point. Keep these distinct so noisy annotations are visible.
+            camera_rays = []
+            ray_projections = []
+            for source_slot, pixel in group.items():
+                source_K, source_R, source_t, source_d = parameters[source_slot]
+                normalized = undistort(pixel, source_K, source_d, inverses[source_slot])
+                direction = source_R.T @ np.array([normalized[0], normalized[1], 1.0])
+                direction /= np.linalg.norm(direction)
+                origin = -source_R.T @ source_t
+                camera_rays.append({
+                    'slot': source_slot,
+                    'origin': origin.tolist(),
+                    'direction': direction.tolist(),
+                })
+                distance = np.linalg.norm(position - origin)
+                if not np.isfinite(distance) or distance <= 1e-10:
+                    continue
+                # Project the same physical ray onto every OTHER image.
+                # With lens distortion the epipolar locus is a curve, not
+                # necessarily a straight line. The 13 samples approximate it.
+                for target_slot, (target_K, target_R, target_t, target_d) in parameters.items():
+                    if target_slot == source_slot:
+                        continue
+                    target = cameras[target_slot]
+                    path = []
+                    for scale in np.geomspace(0.12, 8.0, 13):
+                        world_point = origin + direction * distance * scale
+                        q = target_R @ world_point + target_t
+                        if q[2] <= 1e-10:
+                            continue
+                        try:
+                            projected = target_K @ np.array([
+                                *distort(q[:2] / q[2], target_d), 1
+                            ])
+                        except ValueError:
+                            continue
+                        x, y = projected[:2]
+                        if np.isfinite(x) and np.isfinite(y) and (
+                            -4 * target['image_width'] < x < 5 * target['image_width']
+                            and -4 * target['image_height'] < y < 5 * target['image_height']
+                        ):
+                            path.append([float(x), float(y)])
+                    if len(path) >= 2:
+                        ray_projections.append({
+                            'source_slot': source_slot,
+                            'target_slot': target_slot,
+                            'path': path,
+                        })
             joints.append({'joint': joint, 'position': position.tolist(), 'views': list(group),
                            'reprojection_errors': errors, 'reprojections': reprojections,
+                           'camera_rays': camera_rays, 'ray_projections': ray_projections,
                            'rms_reprojection_error_px': float(np.hypot.reduce([e['error_px'] for e in errors]) / np.sqrt(len(errors)))})
             if joints[-1]['rms_reprojection_error_px'] > 10:
                 warnings.append(f'{joint}: RMS reprojection error exceeds 10 px; check observations and calibration.')
