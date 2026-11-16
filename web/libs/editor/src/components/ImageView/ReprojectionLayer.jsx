@@ -130,10 +130,6 @@ export const ReprojectionLayer = observer(({ item }) => {
 
   const projections = [];
   if (state.enabled) {
-    const errorBySlot = new Map((joint.reprojection_errors ?? []).map(
-      ({ slot, error_px }) => [slot, error_px],
-    ));
-
     for (const point of joint.reprojections ?? []) {
       const pos = toMosaic(point.slot, point.x, point.y);
       if (!pos) continue;
@@ -145,7 +141,23 @@ export const ReprojectionLayer = observer(({ item }) => {
 
       const observed = regionForSlot.get(point.slot);
       const radius = pointRadius(observed) ?? sourceRadius;
-      const color = errorColor(errorBySlot.get(point.slot));
+      const camera = cameraBySlot.get(point.slot);
+      // Measure residuals for every camera with a 2D annotation, INCLUDING
+      // views excluded from triangulation. The reconstruction endpoint only
+      // reports residuals for contributing views, but this comparison uses
+      // the full original mosaic and native calibration image dimensions.
+      const column = point.slot % 2;
+      const row = Math.floor(point.slot / 2);
+      const observedX = observed && camera
+        ? (observed.x / 50 - column) * camera.image_width
+        : NaN;
+      const observedY = observed && camera
+        ? (observed.y / 50 - row) * camera.image_height
+        : NaN;
+      const errorPx = Number.isFinite(observedX) && Number.isFinite(observedY)
+        ? Math.hypot(point.x - observedX, point.y - observedY)
+        : NaN;
+      const color = errorColor(errorPx);
 
       // Draw the displacement between the actual annotation and the 3D
       // projection, as in the reference image. Both ends use the same Konva
