@@ -7,7 +7,7 @@ import { Controls } from "./Controls";
 import { CurrentTask } from "./CurrentTask";
 import "./BottomBar.scss";
 
-export const BottomBar = observer(({ store, onShow3D }) => {
+export const BottomBar = observer(({ store, onShow3D, onToggleReprojection, reprojectionEnabled = false }) => {
   const annotationStore = store.annotationStore;
   const entity = annotationStore?.selected;
   const isPrediction = entity?.type === "prediction";
@@ -24,7 +24,7 @@ export const BottomBar = observer(({ store, onShow3D }) => {
       <div className={cn("bottombar").elem("group").toClassName()}>
         {store.hasInterface("controls") && (store.hasInterface("review") || !isPrediction) && (
           <div className={cn("bottombar").elem("section").mod({ flat: true }).toClassName()}>
-            <Controls annotation={entity} onShow3D={onShow3D} />
+            <Controls annotation={entity} onShow3D={onShow3D} onToggleReprojection={onToggleReprojection} reprojectionEnabled={reprojectionEnabled} />
           </div>
         )}
       </div>
