@@ -2,15 +2,21 @@ import React, { useContext } from "react";
 import { observer } from "mobx-react";
 import { Circle, Group, Layer, Line } from "react-konva";
 import { ReprojectionContext } from "../Skeleton3D/ReprojectionContext";
-import { colorOf } from "../Skeleton3D/topology";
 import { normalizeJoint } from "../Skeleton3D/adapter";
+import { cameraColorOf } from "../Skeleton3D/topology";
+import { getRegionStyles } from "../../hooks/useRegionColor";
 
 /**
- * Read-only dotted projections of reconstructed 3D joints. Native camera
- * pixels are mapped into the original four-quadrant mosaic, then transformed
- * exactly once with the same stageZoom as the raster image.
+ * Read-only reprojection diagnostics for ONE actively selected 2D keypoint.
  *
- * These Konva shapes never receive events and are never serialized as regions.
+ * The marker mirrors that region's actual canvas radius and Label Studio
+ * fill/stroke/opacity rules (KeyPointRegion.jsx/useRegionColor.ts). There
+ * is no hard-coded 8px size, 0.4 opacity, or tiny fallback radius.
+ * The dotted outline distinguishes a projected point from a saved region.
+ *
+ * The 2D camera rays are epipolar curves generated from the actual observed
+ * camera rays; line colour identifies the source camera. None of these
+ * graphics respond to pointer events or enter annotation serialization.
  */
 export const ReprojectionLayer = observer(({ item }) => {
   const state = useContext(ReprojectionContext);
@@ -21,115 +27,112 @@ export const ReprojectionLayer = observer(({ item }) => {
   const height = entity?.naturalHeight;
   const index = item.currentImage ?? 0;
   const store = item.store;
-  const active = store.annotationStore?.selected;
+  const annotation = store.annotationStore?.selected;
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 1 || height <= 1 ||
-      state.task !== store.task?.id || state.annotation !== active?.id ||
+      state.task !== store.task?.id || state.annotation !== annotation?.id ||
       state.image !== item.name || state.index !== index ||
-      state.width !== width || state.height !== height) {
-    return null;
-  }
+      state.width !== width || state.height !== height) return null;
 
-  const cameras = state.cameras ?? [];
+  // The active region selection is the single source of truth. Multi-select,
+  // deselection or selecting a non-keypoint hides all reprojection diagnostics.
+  const source = annotation?.regionStore?.selection?.highlighted;
+  if (!source || source.type !== "keypointregion" || source.hidden ||
+      source.labels?.length !== 1 || !item.regs.some((region) => region.id === source.id)) return null;
+  const jointName = normalizeJoint(source.labels[0]);
+  const joint = state.data.joints.find((candidate) => candidate.joint === jointName);
+  if (!joint) return null;
+
   const zoom = item.stageZoom;
   const viewScale = item.zoomScale;
   if (!Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(viewScale) || viewScale <= 0) return null;
 
-  // Use the same radius formula as the editable KeyPointRegion (canvasWidth / zoomScale).
-  // Resolve per joint and camera, then fall back to the same joint in another camera.
-  const regionRadii = new Map();
-  const fallbackRadii = new Map();
-  for (const region of item.regs) {
-    if (region.type !== "keypointregion" || region.hidden || region.labels?.length !== 1 ||
-        !Number.isFinite(region.x) || !Number.isFinite(region.y)) continue;
-    const name = normalizeJoint(region.labels[0]);
-    const slot = (region.y >= 50 ? 2 : 0) + (region.x >= 50 ? 1 : 0);
-    const radius = Math.max(region.canvasWidth, 2) / viewScale;
-    if (!Number.isFinite(radius) || radius <= 0) continue;
-    regionRadii.set(slot + ":" + name, radius);
-    if (!fallbackRadii.has(name)) fallbackRadii.set(name, radius);
-  }
-  const defaultRadius = Math.max(item.stageWidth * 0.006, 2) / viewScale;
+  // Prefer the visible source Konva circle when available. This is the
+  // exact radius displayed in Label Studio. Otherwise use the identical
+  // KeyPointRegion formula, never an unrelated stage-width fallback.
+  const renderedRadius = source.shapeRef?.radius?.();
+  const radius = Number.isFinite(renderedRadius) && renderedRadius > 0
+    ? renderedRadius
+    : Math.max(source.canvasWidth, 2) / viewScale;
+  if (!Number.isFinite(radius) || radius <= 0) return null;
 
-  const circles = [];
-  const curves = [];
+  // Use exactly the same style resolution as HtxKeyPointView, including
+  // KeyPointLabels/KeyPoint opacity, fillcolor and strokecolor from config.
+  // Alpha is embedded in fillColor; do not multiply it by a second opacity.
+  const regionStyles = getRegionStyles({
+    region: source,
+    shouldFill: true,
+    defaultFillColor: "#000",
+    defaultStrokeColor: "#fff",
+    defaultOpacity: (source.style ?? source.tag) ? 0.6 : 1,
+    sameStrokeWidthForSelected: true,
+  });
+
+  const cameras = state.cameras ?? [];
   const cameraBySlot = new Map(cameras.map((camera) => [camera.slot, camera]));
   const toMosaic = (slot, x, y) => {
     const camera = cameraBySlot.get(slot);
-    if (!camera || !(camera.image_width > 0 && camera.image_height > 0)) return null;
+    if (!camera || !(camera.image_width > 0 && camera.image_height > 0) ||
+        !Number.isFinite(x) || !Number.isFinite(y)) return null;
     return [
       ((slot % 2) + x / camera.image_width) * width * zoom / 2,
       (Math.floor(slot / 2) + y / camera.image_height) * height * zoom / 2,
     ];
   };
-  for (const joint of state.data.joints) {
-    const color = colorOf(joint.joint);
-    if (state.camerasEnabled) {
-      for (const ray of joint.ray_projections ?? []) {
-        const camera = cameraBySlot.get(ray.target_slot);
-        if (!camera || !Array.isArray(ray.path) || ray.path.length < 2) continue;
-        const vertices = ray.path.map(([x, y]) => toMosaic(ray.target_slot, x, y)).filter(Boolean);
-        if (vertices.length < 2) continue;
-        // Confine each projected ray to its own camera tile. With lens
-        // distortion the epipolar locus is a curve, not a straight line.
-        curves.push(
-          <Group
-            key={`ray:${joint.joint}:${ray.source_slot}:${ray.target_slot}`}
-            clipX={(ray.target_slot % 2) * width * zoom / 2}
-            clipY={Math.floor(ray.target_slot / 2) * height * zoom / 2}
-            clipWidth={width * zoom / 2}
-            clipHeight={height * zoom / 2}
-            listening={false}
-          >
-            <Line
-              points={vertices.flat()}
-              stroke={color}
-              strokeWidth={1.4}
-              opacity={0.24}
-              dash={[7, 6]}
-              lineCap="round"
-              strokeScaleEnabled={false}
-              perfectDrawEnabled={false}
-              listening={false}
-            />
-          </Group>,
-        );
-      }
-    }
-    if (!state.enabled) continue;
-    for (const point of joint.reprojections ?? []) {
-      const camera = cameras.find((entry) => entry.slot === point.slot);
-      if (!camera || !(camera.image_width > 0 && camera.image_height > 0) ||
-          !Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
-      const x = ((point.slot % 2) + point.x / camera.image_width) * width / 2;
-      const y = (Math.floor(point.slot / 2) + point.y / camera.image_height) * height / 2;
-      if (!Number.isFinite(x) || !Number.isFinite(y) ||
-          x < 0 || x > width || y < 0 || y > height) continue;
 
-      const key = `${point.slot}:${joint.joint}`;
-      const radius = regionRadii.get(key) ?? fallbackRadii.get(joint.joint) ?? defaultRadius;
-      circles.push(
-        <Circle
-          key={`${key}:outline`}
-          x={x * zoom}
-          y={y * zoom}
-          radius={radius}
-          stroke={color}
-          strokeWidth={1.6}
-          opacity={0.4}
-          dash={[2, 3]}
-          strokeScaleEnabled={false}
-          perfectDrawEnabled={false}
+  const curves = [];
+  if (state.camerasEnabled) {
+    for (const ray of joint.ray_projections ?? []) {
+      if (!Array.isArray(ray.path) || ray.path.length < 2) continue;
+      const vertices = ray.path.map(([x, y]) => toMosaic(ray.target_slot, x, y)).filter(Boolean);
+      if (vertices.length < 2) continue;
+      // Lens distortion means the epipolar locus can be curved. Clip it
+      // within its destination camera quadrant to avoid crossing tiles.
+      curves.push(
+        <Group
+          key={`ray:${joint.joint}:${ray.source_slot}:${ray.target_slot}`}
+          clipX={(ray.target_slot % 2) * width * zoom / 2}
+          clipY={Math.floor(ray.target_slot / 2) * height * zoom / 2}
+          clipWidth={width * zoom / 2}
+          clipHeight={height * zoom / 2}
           listening={false}
-        />,
+        >
+          <Line
+            points={vertices.flat()}
+            stroke={cameraColorOf(ray.source_slot)}
+            strokeWidth={1.8}
+            opacity={0.75}
+            dash={[7, 5]}
+            lineCap="round"
+            strokeScaleEnabled={false}
+            perfectDrawEnabled={false}
+            listening={false}
+          />
+        </Group>,
+      );
+    }
+  }
+
+  const projections = [];
+  if (state.enabled) {
+    for (const point of joint.reprojections ?? []) {
+      const pos = toMosaic(point.slot, point.x, point.y);
+      if (!pos) continue;
+      const [x, y] = pos;
+      const tileX = (point.slot % 2) * width * zoom / 2;
+      const tileY = Math.floor(point.slot / 2) * height * zoom / 2;
+      if (x < tileX || x > tileX + width * zoom / 2 ||
+          y < tileY || y > tileY + height * zoom / 2) continue;
+
+      projections.push(
         <Circle
-          key={`${key}:centre`}
-          x={x * zoom}
-          y={y * zoom}
-          radius={Math.max(0.75 / viewScale, radius * 0.25)}
-          fill={color}
-          opacity={0.35}
-          stroke="#ffffff"
-          strokeWidth={0.75}
+          key={`projection:${point.slot}:${joint.joint}`}
+          x={x}
+          y={y}
+          radius={radius}
+          fill={regionStyles.fillColor}
+          stroke={regionStyles.strokeColor}
+          strokeWidth={Math.max(1, regionStyles.strokeWidth)}
+          dash={[2, 3]}
           strokeScaleEnabled={false}
           perfectDrawEnabled={false}
           listening={false}
@@ -138,5 +141,7 @@ export const ReprojectionLayer = observer(({ item }) => {
     }
   }
 
-  return (circles.length || curves.length) ? <Layer listening={false}>{curves}{circles}</Layer> : null;
+  return (curves.length || projections.length)
+    ? <Layer listening={false}>{curves}{projections}</Layer>
+    : null;
 });
