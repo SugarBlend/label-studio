@@ -48,7 +48,7 @@ import { SideTabsPanels } from "../SidePanels/TabPanels/SideTabsPanels";
 import { TopBar } from "../TopBar/TopBar";
 import { ViewAll } from "./ViewAll";
 import { Skeleton3D } from "../Skeleton3D/Skeleton3D";
-import { adaptSkeleton, createFrameCache, createReconstructionRunner, readSkeletonSnapshot } from "../Skeleton3D/adapter";
+import { adaptSkeleton, createFrameCache, createReconstructionRunner, normalizeJoint, readSkeletonSnapshot } from "../Skeleton3D/adapter";
 import { requestReconstruction } from "../Skeleton3D/request";
 import { ReprojectionContext } from "../Skeleton3D/ReprojectionContext";
 
@@ -87,6 +87,26 @@ class App extends Component {
   reprojectionTarget = null;
 
   onShow3D = () => this.skeleton3dRef.current?.show();
+
+  // Clicking a 3D joint selects its editable 2D region, if one exists.
+  // Empty space clears the selection. Both canvases then use the exact same
+  // RegionStore selection state, including when the 3D popup is detached.
+  selectJointFrom3D = (name) => {
+    const annotation = this.props.store.annotationStore?.selected;
+    const regionStore = annotation?.regionStore;
+    if (!regionStore) return;
+    if (!name) {
+      regionStore.clearSelection();
+      return;
+    }
+    const region = regionStore.regions.find((candidate) =>
+      candidate.type === "keypointregion" &&
+      !candidate.hidden &&
+      candidate.labels?.length === 1 &&
+      normalizeJoint(candidate.labels[0]) === name,
+    );
+    if (region) regionStore.highlight(region);
+  };
 
   // Shared source of truth for both the detached 3D window and the 2D
   // reprojection runner. Camera exclusion affects triangulation only;
@@ -337,6 +357,10 @@ class App extends Component {
   render() {
     const { store } = this.props;
     const as = store.annotationStore;
+    const selectedPoint = as.selected?.regionStore?.selection?.highlighted;
+    const selectedJoint = selectedPoint?.type === "keypointregion" && selectedPoint.labels?.length === 1
+      ? normalizeJoint(selectedPoint.labels[0])
+      : null;
     const root = as.selected && as.selected.root;
     const { settings } = store;
 
@@ -400,6 +424,8 @@ class App extends Component {
                   externalCamerasEnabled={this.state.camerasEnabled}
                   controlledEnabledCameraSlots={this.state.triangulationCameraSlots}
                   onChangeEnabledCameraSlots={this.setTriangulationCameraSlots}
+                  controlledSelectedJoint={selectedJoint}
+                  onChangeSelectedJoint={this.selectJointFrom3D}
                 />
               )}
               <div
