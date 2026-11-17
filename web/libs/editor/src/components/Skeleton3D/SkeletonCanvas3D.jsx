@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BONE, LEFT, RIGHT, cameraColorOf, colorOf, sideOf, standardEdges } from "./topology";
+import { BONE, LEFT, RIGHT, cameraColorOf, colorOf, sideOf, uniqueRelationEdges } from "./topology";
 import { hasHighReprojectionError } from "./reprojectionQuality";
 
 const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -118,10 +118,9 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
     }
   }
 
-  const links = new Map([...standardEdges, ...(data.edges || [])].map((edge) => [[...edge].sort().join(":"), edge]));
-  // Do not reintroduce neck-to-central-hip from manually authored Relations.
-  const edges = [...links.values()].filter(([a, b]) =>
-    projected.has(a) && projected.has(b) && !((a === "neck" && b === "hip") || (a === "hip" && b === "neck")));
+  // All 3D bones come from Relations of the current annotation/prediction.
+  // Arbitrary names and explicit neck–hip links are allowed.
+  const edges = uniqueRelationEdges(data.edges, new Set(projected.keys()));
 
   // Contact shadows share the same ground plane as the grid.
   if (options.shadow) {
