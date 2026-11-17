@@ -11,7 +11,7 @@ export const RIGHT = "#ed7929";
 // and 2D epipolar curves. Colour represents the SOURCE camera, not the joint.
 export const CAMERA_COLORS = ["#db4b45", "#128e75", "#3e77df", "#a461c5"];
 export const cameraColorOf = (slot) => CAMERA_COLORS[slot] ?? "#64748b";
-export const BONE = "#475569";
+export const BONE = "#94A3B8";
 
 /**
  * Return unique, undirected bone edges ONLY when they are saved as Relations
