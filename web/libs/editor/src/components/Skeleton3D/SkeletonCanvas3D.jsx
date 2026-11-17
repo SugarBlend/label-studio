@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BONE, boneColorOf, cameraColorOf, colorOf, uniqueRelationEdges } from "./topology";
+import { BONE, boneColorOf, cameraColorOf, colorOf, neutralColorOf, uniqueRelationEdges } from "./topology";
 import { hasHighReprojectionError } from "./reprojectionQuality";
 
 const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -62,6 +62,8 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
   const axisY = unit(cross(up, axisX));
   const world = (p) => [dot(p, axisX), dot(p, axisY), dot(p, up)];
   const points = new Map(joints.map((j) => [j.joint, world(j.position)]));
+  const configuredColors = data.colors ?? {};
+  const neutral = neutralColorOf(Object.entries(configuredColors));
   const values = [...points.values()];
   const center = mul(values.reduce(add, [0, 0, 0]), 1 / values.length);
   const radius = Math.max(1, ...values.map((p) => Math.hypot(...sub(p, center))));
@@ -134,7 +136,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
     for (const name of points.keys()) {
       const path = history.map((snapshot) => snapshot[name]).filter(finite).map(world).map(pt);
       for (let i = 1; i < path.length; i++) {
-        line(path[i - 1], path[i], colorOf(name), Math.max(1, 1.5 * options.size), 0.08 + 0.3 * i / path.length);
+        line(path[i - 1], path[i], colorOf(name, configuredColors[name]), Math.max(1, 1.5 * options.size), 0.08 + 0.3 * i / path.length);
       }
     }
   }
@@ -185,7 +187,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
 
   const drawBone = ([a, b]) => {
     const ap = projected.get(a), bp = projected.get(b);
-    const palette = boneColorOf(a, b);
+    const palette = boneColorOf(a, b, configuredColors[a], configuredColors[b], neutral);
     const color = options.colour === "neutral" ? BONE : palette;
     const thick = Math.max(2.1, 4.7 * options.size * Math.min(1.5, ((ap.magnification + bp.magnification) / 2) * radius / h));
     const hasWarning = highErrorNames.has(a) || highErrorNames.has(b);
@@ -205,7 +207,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
   joints.slice().sort((a, b) => projected.get(b.joint).depth - projected.get(a.joint).depth).forEach((joint) => {
     const p = projected.get(joint.joint);
     // No special joint names: the same styling applies to any skeleton.
-    const colour = options.colour === "neutral" ? BONE : colorOf(joint.joint);
+    const colour = options.colour === "neutral" ? BONE : colorOf(joint.joint, configuredColors[joint.joint]);
     const radiusPx = Math.max(2.1, 4.1 * options.size);
     const halo = ctx.createRadialGradient(p.x - radiusPx * 0.38, p.y - radiusPx * 0.45, 0.6, p.x, p.y, radiusPx * 1.1);
     halo.addColorStop(0, "#ffffff");
