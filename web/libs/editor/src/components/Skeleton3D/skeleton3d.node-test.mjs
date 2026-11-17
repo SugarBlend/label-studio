@@ -76,6 +76,33 @@ test("resizing and display rotation preserve pixel observations; edges stay with
   assert.deepEqual(result.observations[2], { slot: 3, joint: "l_big_toe", x: 0, y: 0 });
   assert.deepEqual(result.edges, [["l_big_toe", "l_heel"]]);
 });
+test("arbitrary Relations define 3D bones without a predefined schema", () => {
+  const make = (id, label, x, y) => ({ ...point(id, x, y), labels: [label] });
+  const input = snapshot([
+    make("root0", "custom_root", 20, 20),
+    make("tip0", "custom_tip", 25, 25),
+    make("root1", "custom_root", 70, 20),
+    make("tip1", "custom_tip", 75, 25),
+  ], [["root0", "tip0"], ["root1", "tip1"], ["tip0", "root0"]]);
+  const result = adaptSkeleton(input, config);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.edges, [["custom_root", "custom_tip"]]);
+  assert.deepEqual(adaptSkeleton(snapshot(input.points), config).edges, []);
+});
+
+test("saved Relations from an excluded camera still define the same topology", () => {
+  const make = (id, label, x, y) => ({ ...point(id, x, y), labels: [label] });
+  const input = snapshot([
+    make("a0", "node_a", 20, 20), make("b0", "node_b", 25, 25),
+    make("a1", "node_a", 70, 20), make("b1", "node_b", 75, 25),
+    make("a2", "node_a", 20, 70), make("b2", "node_b", 25, 75),
+  ], [["a1", "b1"]]);
+  const result = adaptSkeleton(input, config, [0, 2, 3]);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.observations.map((o) => o.slot), [0, 0, 2, 2]);
+  assert.deepEqual(result.edges, [["node_a", "node_b"]]);
+});
+
 test("normalizes common foot aliases", () => {
   for (const name of ["Left Big Toe", "leftBigToe", "big_toe_left", "l_bigtoe", "BigToe_L"]) assert.equal(normalizeJoint(name), "l_big_toe");
   assert.equal(normalizeJoint("Right Little Toe"), "r_small_toe");
