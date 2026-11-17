@@ -42,19 +42,68 @@ export const sideOf = (joint) => {
   return null;
 };
 
-export const colorOf = (joint) =>
-  sideOf(joint) === "left" ? LEFT : sideOf(joint) === "right" ? RIGHT : BONE;
+/**
+ * Label Studio stores <Label background="#RRGGBB"> as the keypoint's
+ * region.style.fillcolor. Canonicalize hex values for the 3D canvas tint
+ * routine, while accepting CSS shorthand and optional alpha.
+ */
+export const normalizeHexColor = (value) => {
+  if (typeof value !== "string") return null;
+  const color = value.trim();
+  if (/^#[\da-f]{3,4}$/i.test(color)) {
+    const full = color.slice(1).split("").map((c) => c + c).join("");
+    return "#" + full.slice(0, 6).toUpperCase();
+  }
+  if (/^#[\da-f]{6}([\da-f]{2})?$/i.test(color)) {
+    return color.slice(0, 7).toUpperCase();
+  }
+  return null;
+};
+
+/** Use the actual Label background when present; naming is only fallback. */
+export const colorOf = (joint, configuredColor) =>
+  normalizeHexColor(configuredColor) ??
+  (sideOf(joint) === "left" ? LEFT : sideOf(joint) === "right" ? RIGHT : BONE);
 
 /**
- * A neutral/central endpoint inherits the other endpoint's side.
- * A left-right cross-body link and a neutral-neutral link are gray.
- * Both 2D and 3D use this identical rule; Relations alone define edges.
+ * For cross-body bones, prefer the most frequent explicitly configured
+ * neutral-joint colour over the fallback gray. No named joints are required.
+ * Each entry is [jointName, labelBackground].
  */
-export const boneColorOf = (from, to) => {
+export const neutralColorOf = (entries = []) => {
+  const counts = new Map();
+  for (const [joint, value] of entries) {
+    if (sideOf(joint)) continue;
+    const color = normalizeHexColor(value);
+    if (!color) continue;
+    counts.set(color, (counts.get(color) ?? 0) + 1);
+  }
+  let best = BONE, max = 0;
+  for (const [color, count] of counts) {
+    if (count > max) { best = color; max = count; }
+  }
+  return best;
+};
+
+/**
+ * Both 2D and 3D choose bone colours from the two Label backgrounds.
+ * Central -> sided: choose the sided endpoint's colour.
+ * Opposite sides: use configured neutral colour; identical colours: reuse.
+ * This affects appearance only: topology always comes from saved Relations.
+ */
+export const boneColorOf = (from, to, fromColor, toColor, neutralColor = BONE) => {
+  const neutral = normalizeHexColor(neutralColor) ?? BONE;
+  const aColor = colorOf(from, fromColor);
+  const bColor = colorOf(to, toColor);
   const a = sideOf(from);
   const b = sideOf(to);
-  if (a && b && a !== b) return BONE;
-  return a === "left" || b === "left" ? LEFT
-    : a === "right" || b === "right" ? RIGHT
-      : BONE;
+
+  if (a && b && a !== b) return neutral;
+  if (aColor.toLowerCase() === bColor.toLowerCase()) return aColor;
+  if (a && !b) return aColor;
+  if (b && !a) return bColor;
+  if (aColor.toLowerCase() === neutral.toLowerCase()) return bColor;
+  if (bColor.toLowerCase() === neutral.toLowerCase()) return aColor;
+  if (a && b && a === b) return String(from) < String(to) ? aColor : bColor;
+  return neutral;
 };
