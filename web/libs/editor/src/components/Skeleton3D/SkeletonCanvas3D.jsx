@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BONE, LEFT, RIGHT, cameraColorOf, colorOf, sideOf, uniqueRelationEdges } from "./topology";
+import { BONE, cameraColorOf, colorOf, uniqueRelationEdges } from "./topology";
 import { hasHighReprojectionError } from "./reprojectionQuality";
 
 const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -138,20 +138,6 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
       }
     }
   }
-  if (options.path && history.length > 1) {
-    for (const side of ["l", "r"]) {
-      const path = history.map((snap) => {
-        const heel = snap[side + "_heel"];
-        const big = snap[side + "_big_toe"];
-        const small = snap[side + "_small_toe"];
-        return finite(heel) && finite(big) && finite(small) ? mul(add(add(heel, big), small), 1 / 3) : null;
-      }).filter(finite).map(world).map(pt);
-      for (let i = 1; i < path.length; i++) {
-        line(path[i - 1], path[i], side === "l" ? LEFT : RIGHT, 3 * options.size, 0.55);
-      }
-    }
-  }
-
   if (options.cameras || options.rays || options.externalCameraRays) {
     for (const camera of config?.cameras || []) {
       const centre = cameraCentre(camera.calibration);
@@ -197,20 +183,9 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
     }
   }
 
-  if (options.soles) {
-    for (const side of ["l", "r"]) {
-      const keys = ["heel", "big_toe", "small_toe"].map((part) => side + "_" + part);
-      if (!keys.every((k) => projected.has(k))) continue;
-      const [a, b, c] = keys.map((k) => projected.get(k));
-      ctx.beginPath();ctx.moveTo(a.x, a.y);ctx.lineTo(b.x, b.y);ctx.lineTo(c.x, c.y);ctx.closePath();
-      ctx.fillStyle = side === "l" ? "rgba(21,158,232,0.22)" : "rgba(237,121,41,0.22)";
-      ctx.fill();
-    }
-  }
-
   const drawBone = ([a, b]) => {
     const ap = projected.get(a), bp = projected.get(b);
-    const palette = sideOf(a) && sideOf(a) === sideOf(b) ? colorOf(a) : BONE;
+    const palette = colorOf(a);
     const color = options.colour === "neutral" ? BONE : palette;
     const thick = Math.max(2.1, 4.7 * options.size * Math.min(1.5, ((ap.magnification + bp.magnification) / 2) * radius / h));
     const hasWarning = highErrorNames.has(a) || highErrorNames.has(b);
@@ -229,11 +204,8 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
 
   joints.slice().sort((a, b) => projected.get(b.joint).depth - projected.get(a.joint).depth).forEach((joint) => {
     const p = projected.get(joint.joint);
-    // Toe landmarks are intentionally distinct from the body-side palette:
-    // big toes are red, small toes black (left AND right).
-    const colour = joint.joint.endsWith("_big_toe") ? "#e53935"
-      : joint.joint.endsWith("_small_toe") ? "#171717"
-        : options.colour === "neutral" ? BONE : colorOf(joint.joint);
+    // No special joint names: the same styling applies to any skeleton.
+    const colour = options.colour === "neutral" ? BONE : colorOf(joint.joint);
     const radiusPx = Math.max(2.1, 4.1 * options.size);
     const halo = ctx.createRadialGradient(p.x - radiusPx * 0.38, p.y - radiusPx * 0.45, 0.6, p.x, p.y, radiusPx * 1.1);
     halo.addColorStop(0, "#ffffff");
@@ -244,7 +216,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
     ctx.strokeStyle = "#eaf0f7";ctx.lineWidth = 0.8;ctx.stroke();
     if (highErrorNames.has(joint.joint)) {
       // Warning ring leaves the original joint fill intact, including
-      // red big toes and black small toes, while exposing bad 2D matches.
+      // preserve the original fill while showing large residuals.
       ctx.beginPath();
       ctx.arc(p.x, p.y, radiusPx + 3.5, 0, Math.PI * 2);
       ctx.strokeStyle = "#dc2626";
@@ -264,24 +236,6 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
       ctx.fillText(joint.joint, p.x + radiusPx + 3, p.y - 4);
     }
   });
-
-  if (options.labels) {
-    for (const side of ["l", "r"]) {
-      const foot = ["heel", "big_toe", "small_toe"].map((name) => projected.get(side + "_" + name));
-      if (foot.some((p) => !p)) continue;
-      const x = foot.reduce((v, p) => v + p.x, 0) / 3;
-      const y = foot.reduce((v, p) => v + p.y, 0) / 3;
-      const angle = data.foot_tilt?.[side === "l" ? "left" : "right"];
-      const text = (side === "l" ? "L" : "R") + " forefoot tilt: " +
-        (Number.isFinite(angle) ? (angle >= 0 ? "+" : "") + angle.toFixed(1) + "°" : "n/a");
-      const atX = Math.min(w - 210, Math.max(6, x + (side === "l" ? 10 : -180)));
-      const atY = Math.min(h - 8, Math.max(85, y + 36 + (side === "l" ? 0 : 22)));
-      line({ x, y }, { x: atX, y: atY - 5 }, side === "l" ? LEFT : RIGHT, 1);
-      ctx.font = "600 13px system-ui, sans-serif";
-      ctx.fillStyle = side === "l" ? "#188ad0" : "#dd7019";
-      ctx.fillText(text, atX, atY);
-    }
-  }
 
   // The hit-test uses the same projection as the canvas renderer.
   const hitTargets = [...projected].map(([joint, p]) => ({ joint, x: p.x, y: p.y }));
@@ -314,7 +268,7 @@ export function SkeletonCanvas3D({
   const [internalOptions, setInternalOptions] = useState({
     colour: "body", size: 1, grid: true, labels: true,
     labelNames: false, cameras: false, rays: false,
-    shadow: true, trail: false, path: false, soles: true,
+    shadow: true, trail: false,
   });
   const [internalSelectedJoint, setInternalSelectedJoint] = useState(null);
   const [dimensions, setDimensions] = useState(0);
@@ -356,7 +310,7 @@ export function SkeletonCanvas3D({
 
   const toggle = (key) => setOptions((old) => ({ ...old, [key]: !old[key] }));
   const toggles = [["labels", "Labels"], ["cameras", "Cameras"], ["rays", "Rays"],
-    ["shadow", "Shadow"], ["trail", "Trail"], ["path", "Path"], ["soles", "Soles"]];
+    ["shadow", "Shadow"], ["trail", "Trail"]];
   return (
     <section style={{
       display: "flex", flexDirection: "column", width: "100%", minWidth: 0,
@@ -366,7 +320,7 @@ export function SkeletonCanvas3D({
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 7, padding: "7px 4px", fontSize: 12, background: "#fff" }}>
         <label>Colour{" "}
           <select value={options.colour} onChange={(e) => setOptions((old) => ({ ...old, colour: e.target.value }))}>
-            <option value="body">Body side</option><option value="neutral">Neutral</option>
+            <option value="body">By joint</option><option value="neutral">Neutral</option>
           </select>
         </label>
         <label>Size{" "}
