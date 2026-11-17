@@ -8,7 +8,6 @@ import { mergeFrameState } from "./frameState";
 import { getReprojectionWarnings } from "./reprojectionQuality";
 import { cn } from "../../utils/bem";
 
-const formatAngle = (value) => (Number.isFinite(value) ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)}°` : "n/a");
 
 const PANEL_KEY = "ls.skeleton3d.panel";
 const readPanelState = () => {
@@ -30,7 +29,7 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({
   controlledSelectedJoint, onChangeSelectedJoint,
 }, ref) {
   const [state, setState] = useState({ status: "pending", data: null });
-  // Temporary in-memory reconstruction history for the Trail / Path toggles.
+  // Temporary in-memory reconstruction history for the generic Trail toggle.
   // No points or trajectories are saved into the Label Studio annotations.
   const history = useRef([]);
   // Per-editor, per-browser-tab LRU. No backend/shared cache or task prefetch.
@@ -60,7 +59,7 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({
   const [sceneOptions, setSceneOptions] = useState({
     colour: "body", size: 1, grid: true, labels: true,
     labelNames: false, cameras: false, rays: false,
-    shadow: true, trail: false, path: false, soles: true,
+    shadow: true, trail: false,
   });
   const [localSelectedJoint, setLocalSelectedJoint] = useState(null);
   const selectedJoint = controlledSelectedJoint === undefined ? localSelectedJoint : controlledSelectedJoint;
@@ -268,7 +267,6 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({
     ? (state.status === "pending" ? "Loading frame · showing previous pose" : "Previous pose · current frame unavailable")
     : state.status === "pending" ? "reconstructing…"
       : state.status === "ready" ? (state.cached ? "cached frame · drag to orbit" : "drag to orbit · wheel to zoom") : "";
-  const angles = safeData ? `L ${formatAngle(safeData.foot_tilt?.left)} · R ${formatAngle(safeData.foot_tilt?.right)}` : "";
   const scene = (
     <section ref={box} aria-label="Live 3D skeleton"
       style={{
@@ -421,7 +419,7 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({
 
           {!data && <p style={{ fontSize: 12, color: "#475569" }}>Waiting for keypoints in at least two camera slots.</p>}
           <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
-            Triangulation only, no fitting. Geometric angle, not a clinical assessment; positive means the big toe is higher.
+            Triangulation only, no fitting. Bones follow saved Relations from the selected source.
           </p>
           {warnings.length > 0 && (
             <details style={{ fontSize: 12 }}><summary>Warnings ({warnings.length})</summary>
@@ -438,7 +436,6 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({
             </details>
           )}
 
-            {angles && <div style={{ color: "#64748b", fontSize: 11 }}>Foot tilt: {angles}</div>}
           </div>
         </div>
       )}
