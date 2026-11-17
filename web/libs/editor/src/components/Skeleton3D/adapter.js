@@ -76,7 +76,13 @@ export function readSkeletonSnapshot(store, sourceId = "auto") {
         rotation: entity?.rotation ?? 0,
       };
     }),
-    edges: (annotation?.relationStore.relations ?? []).map((r) => [r.node1?.id, r.node2?.id]),
+    // Only current, visible Relations define topology. A single camera's
+    // joint may be hidden or a view excluded from triangulation without
+    // removing an otherwise valid bone from the source skeleton.
+    edges: (annotation?.relationStore?.relations ?? [])
+      .filter((r) => r.node1 && r.node2 && r.visible !== false &&
+        r.shouldRender !== false && !r.node1.hidden && !r.node2.hidden)
+      .map((r) => [r.node1.id, r.node2.id]),
   };
 }
 
@@ -138,7 +144,14 @@ export function adaptSkeleton(snapshot, config, enabledSlots = [0, 1, 2, 3]) {
   const observations = [];
   const candidates = new Map();
   const groups = [new Set(), new Set(), new Set(), new Set()];
-  const pointsById = new Map();
+  // Resolve Relation IDs against ALL cameras before excluding disabled
+  // observations. Topology is an annotation property, not a camera property.
+  const namesById = new Map(snapshot.points.map((point) => [
+    point.id,
+    { joint: point.labels?.length === 1 ? normalizeJoint(point.labels[0]) : "",
+      slot: Number.isFinite(point.x) && Number.isFinite(point.y)
+        ? (point.y < 50 ? 0 : 2) + (point.x < 50 ? 0 : 1) : -1 },
+  ]));
   for (const point of points) {
     if (![point.x, point.y, point.width, point.height].every(Number.isFinite) ||
         point.width <= 1 || point.height <= 1 || point.x < 0 || point.x > 100 || point.y < 0 || point.y > 100) {
@@ -191,13 +204,19 @@ export function adaptSkeleton(snapshot, config, enabledSlots = [0, 1, 2, 3]) {
       notes.push(`Duplicate joint ${joint} in slot ${slot}: kept the point closest to the body, ignored ${list.length - 1}.`);
     }
     observations.push(chosen.observation);
-    pointsById.set(chosen.point.id, chosen.observation);
   }
   const edges = [];
-  for (const [a, b] of snapshot.edges) {
-    const start = pointsById.get(a);
-    const end = pointsById.get(b);
-    if (start && end && start.slot === end.slot && start.joint !== end.joint) edges.push([start.joint, end.joint]);
+  const seenEdges = new Set();
+  for (const [a, b] of snapshot.edges ?? []) {
+    const start = namesById.get(a);
+    const end = namesById.get(b);
+    if (!start?.joint || !end?.joint || start.slot !== end.slot ||
+        start.joint === end.joint) continue;
+    const key = [start.joint, end.joint].sort().join("\u0000");
+    if (!seenEdges.has(key)) {
+      seenEdges.add(key);
+      edges.push([start.joint, end.joint]);
+    }
   }
   return { observations, edges, notes, error: null };
 }
