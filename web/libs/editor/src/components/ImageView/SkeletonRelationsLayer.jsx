@@ -1,6 +1,6 @@
 import { observer } from "mobx-react";
 import { Layer, Line } from "react-konva";
-import { boneColorOf } from "../Skeleton3D/topology";
+import { boneColorOf, neutralColorOf } from "../Skeleton3D/topology";
 
 /**
  * Renders manually-created Relations between two KeyPointLabels regions as
@@ -50,6 +50,12 @@ const SkeletonRelationsLayer = observer(({ item }) => {
   if (relations.length === 0) return null;
 
   const highlighted = relationStore.highlighted;
+  // Label Studio already resolves each XML <Label background> to style.fillcolor.
+  const neutral = neutralColorOf(
+    (annotation.regionStore?.regions ?? [])
+      .filter((region) => region.type === "keypointregion")
+      .map((region) => [region.labels?.[0], region.style?.fillcolor]),
+  );
 
   const lines = relations.map((relation) => {
     const { node1, node2 } = relation;
@@ -57,7 +63,10 @@ const SkeletonRelationsLayer = observer(({ item }) => {
     if (node1.hidden || node2.hidden) return null;
     if (!node1.inViewPort || !node2.inViewPort) return null;
 
-    const boneColor = boneColorOf(node1.labels?.[0], node2.labels?.[0]);
+    const boneColor = boneColorOf(
+      node1.labels?.[0], node2.labels?.[0],
+      node1.style?.fillcolor, node2.style?.fillcolor, neutral,
+    );
     const isHighlighted = highlighted === relation;
     const dimmed = !!highlighted && !isHighlighted;
 
