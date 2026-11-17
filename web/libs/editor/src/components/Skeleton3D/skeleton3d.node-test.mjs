@@ -103,6 +103,28 @@ test("saved Relations from an excluded camera still define the same topology", (
   assert.deepEqual(result.edges, [["node_a", "node_b"]]);
 });
 
+test("3D colours come from the selected source's Label background values", () => {
+  const make = (id, label, color, x, y) => ({ ...point(id, x, y), labels: [label], color });
+  const input = snapshot([
+    make("a0", "neck", "#CBD5E1", 20, 20),
+    make("b0", "left_shoulder", "#02AABB", 25, 25),
+    make("a1", "neck", "#CBD5E1", 70, 20),
+    make("b1", "left_shoulder", "#02AABB", 75, 25),
+  ], [["a0", "b0"]]);
+  const result = adaptSkeleton(input, config);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.colors, { neck: "#CBD5E1", l_shoulder: "#02AABB" });
+  assert.deepEqual(result.edges, [["neck", "l_shoulder"]]);
+  assert.deepEqual(adaptSkeleton(input, config, [1, 2, 3]).colors, result.colors);
+});
+
+test("live snapshot extracts the actual Label Studio background style", () => {
+  const region = { ...point("key", 20, 20), type: "keypointregion", style: { fillcolor: "#AA7711" },
+    parent: { name: "img", findImageEntity: () => ({ imageLoaded: true, naturalWidth: 1280, naturalHeight: 960 }) } };
+  const selected = { id: "ann", regionStore: { regions: [region] }, relationStore: { relations: [] } };
+  assert.equal(readSkeletonSnapshot({ task: { id: 1 }, annotationStore: { selected } }).points[0].color, "#AA7711");
+});
+
 test("normalizes common foot aliases", () => {
   for (const name of ["Left Big Toe", "leftBigToe", "big_toe_left", "l_bigtoe", "BigToe_L"]) assert.equal(normalizeJoint(name), "l_big_toe");
   assert.equal(normalizeJoint("Right Little Toe"), "r_small_toe");
