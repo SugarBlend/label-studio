@@ -579,11 +579,15 @@ export default observer(
       const tool = item.getToolsManager().findSelectedTool();
       const isAllowedTool = tool?.toolName?.match?.(allowedHoverTypes) !== null ?? false;
 
-      const hoveredRegion = item.regs.find((reg) => {
+      const hoveredRegions = item.regs.filter((reg) => {
         if (reg.selected || tool?.mode === "drawing") return false;
 
         return reg.isHovered?.() ?? false;
       });
+      // In the fallback stage-click path, prefer an actual keypoint over a
+      // detector rectangle whenever both report hover. The native Konva
+      // hit test also prioritizes keypoints via the dedicated upper layer.
+      const hoveredRegion = hoveredRegions.find((reg) => reg.type === "keypointregion") ?? hoveredRegions[0];
 
       if (hoveredRegion && !evt.defaultPrevented) {
         tool?.disable();
@@ -1452,7 +1456,10 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
   if (!isAlive(item)) return null;
   if (!store.task || !item.currentSrc) return null;
 
-  // Keep selected or highlighted region on top
+  // Preserve the selected/highlighted order inside each kind of region.
+  // Layer order below determines the actual Konva hit-test priority:
+  // editable keypoints always sit ABOVE detector bounding boxes, even when
+  // the box is selected and its transformer is visible.
   const regions = [...item.regs].sort((r) => (r.highlighted || r.selected ? 1 : -1));
   const paginationEnabled = !!item.isMultiItem;
   const wrapperClasses = [styles.wrapperComponent, item.images.length > 1 ? styles.withGallery : styles.wrapper];
@@ -1468,13 +1475,23 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
     bitmaskRegions: suggestedBitmaskRegions,
   } = splitRegions(item.suggestions);
 
+  // All ordinary regions (including draggable rectangleregion detector boxes)
+  // remain in the lower part of the Stage. Move keypointregion into its own
+  // top layer, above even the selected box's Konva Transformer. Unlike a
+  // click handler workaround, this preserves native drag/click behaviour,
+  // linking mode and regular box interaction outside a keypoint.
+  const keypointRegions = shapeRegions.filter((region) => region.type === "keypointregion");
+  const otherShapeRegions = shapeRegions.filter((region) => region.type !== "keypointregion");
+  const suggestedKeypoints = suggestedShapeRegions.filter((region) => region.type === "keypointregion");
+  const otherSuggestedShapes = suggestedShapeRegions.filter((region) => region.type !== "keypointregion");
+
   const renderableRegions = Object.entries({
     brush: brushRegions,
-    shape: shapeRegions,
+    shape: otherShapeRegions,
     bitmask: bitmaskRegions,
     suggestedBrush: suggestedBrushRegions,
     suggestedBismask: suggestedBitmaskRegions,
-    suggestedShape: suggestedShapeRegions,
+    suggestedShape: otherSuggestedShapes,
   });
 
   return (
@@ -1484,8 +1501,6 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
       {item.grid && item.sizeUpdated && <ImageGrid item={item} />}
 
       {isFF(FF_LSDV_4930) ? <TransformerBack item={item} /> : null}
-
-      <SkeletonRelationsLayer item={item} />
 
       {renderableRegions.map(([groupName, list]) => {
         const useLayers = groupName.match(/brush/i) === null;
@@ -1504,11 +1519,30 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
           <Fragment key={groupName} />
         );
       })}
-      {/* Draw all residual vectors and dotted reprojections over skeleton bones
-          and original region shapes. Their layer has listening=false, so
-          dragging or selecting the underlying annotation still works. */}
-      <ReprojectionLayer item={item} />
+      {/* Skeleton connections are above detector boxes, but below the
+          keypoints themselves; never take part in pointer hit testing. */}
+      <SkeletonRelationsLayer item={item} />
+      {/* Keep box transform handles functional, but do not let the selected
+          box or its Transformer steal clicks from actual keypoint circles. */}
       <Selection item={item} isPanning={state.isPanning} />
+      {suggestedKeypoints.length > 0 && (
+        <Regions
+          name="suggested-keypoints"
+          regions={suggestedKeypoints}
+          suggestion
+          smoothing={item.smoothingEnabled}
+        />
+      )}
+      {keypointRegions.length > 0 && (
+        <Regions
+          name="editable-keypoints"
+          regions={keypointRegions}
+          smoothing={item.smoothingEnabled}
+        />
+      )}
+      {/* Diagnostic overlays stay visible above the keypoints, but are
+          noninteractive and therefore cannot intercept selection or drag. */}
+      <ReprojectionLayer item={item} />
       <DrawingRegion item={item} />
       {item.smoothingEnabled === false && <PixelGridLayer item={item} />}
 
