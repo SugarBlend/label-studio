@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 const source = await readFile(new URL("./topology.js", import.meta.url), "utf8");
-const { uniqueRelationEdges, boneColorOf, colorOf, BONE, LEFT, RIGHT } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const { uniqueRelationEdges, boneColorOf, colorOf, neutralColorOf, normalizeHexColor, BONE, LEFT, RIGHT } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
 
 test("no Relations means no 3D bones, even with HALPE-named joints", () => {
   const visible = new Set(["l_ankle", "l_big_toe", "neck", "hip"]);
@@ -43,4 +43,33 @@ test("same-side, mixed-side and neutral Relations have deterministic colors", ()
   assert.equal(colorOf("left_heel"), LEFT);
   assert.equal(colorOf("right_wrist"), RIGHT);
   assert.equal(colorOf("custom_joint"), BONE);
+});
+
+test("Label backgrounds override fallback 3D point colours", () => {
+  assert.equal(colorOf("left_wrist", "#AC0FFE"), "#AC0FFE");
+  assert.equal(colorOf("custom_tip", "#22aa44"), "#22AA44");
+  assert.equal(normalizeHexColor("#fa8"), "#FFAA88");
+  assert.equal(colorOf("left_wrist", null), LEFT);
+});
+
+test("2D and 3D bones follow endpoint Label colours, not fixed blue/orange", () => {
+  const neutral = "#CBD5E1", left = "#12AABB", right = "#DD5500";
+  assert.equal(boneColorOf("neck", "left_shoulder", neutral, left, neutral), left);
+  assert.equal(boneColorOf("left_shoulder", "neck", left, neutral, neutral), left);
+  assert.equal(boneColorOf("neck", "right_shoulder", neutral, right, neutral), right);
+  assert.equal(boneColorOf("left_elbow", "left_wrist", left, left, neutral), left);
+  assert.equal(boneColorOf("left_hip", "right_hip", left, right, neutral), neutral);
+  assert.equal(boneColorOf("neck", "head", neutral, neutral, neutral), neutral);
+  assert.equal(boneColorOf("custom_A", "custom_B", "#11AA22", "#11AA22"), "#11AA22");
+});
+
+test("cross-body neutral colour is read from configuration's central points", () => {
+  assert.equal(neutralColorOf([
+    ["left_hip", "#1A2B3C"],
+    ["right_hip", "#DDEEFF"],
+    ["neck", "#CBD5E1"],
+    ["nose", "#CBD5E1"],
+    ["hip", "#CBD5E1"],
+  ]), "#CBD5E1");
+  assert.equal(neutralColorOf([]), BONE);
 });
