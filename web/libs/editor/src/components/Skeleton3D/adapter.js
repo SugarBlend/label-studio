@@ -71,6 +71,8 @@ export function readSkeletonSnapshot(store, sourceId = "auto") {
       return {
         id: r.id, group: r.parentID || "", image: image?.name,
         index: r.item_index ?? 0, x: r.x, y: r.y, labels: Array.from(r.labels ?? []),
+        // Same resolved <Label background> used by Label Studio's 2D keypoint.
+        color: r.style?.fillcolor ?? null,
         width: entity?.imageLoaded ? entity.naturalWidth : r._rawResult?.original_width,
         height: entity?.imageLoaded ? entity.naturalHeight : r._rawResult?.original_height,
         rotation: entity?.rotation ?? 0,
@@ -205,6 +207,16 @@ export function adaptSkeleton(snapshot, config, enabledSlots = [0, 1, 2, 3]) {
     }
     observations.push(chosen.observation);
   }
+  // Colours follow the Label configuration, independent of camera exclusion.
+  // A joint can be observed from multiple cameras: keep the first configured
+  // colour. If none is available, the 3D renderer uses its normal fallback.
+  const colors = {};
+  for (const point of snapshot.points) {
+    const joint = point.labels?.length === 1 ? normalizeJoint(point.labels[0]) : "";
+    if (joint && typeof point.color === "string" && !colors[joint]) {
+      colors[joint] = point.color;
+    }
+  }
   const edges = [];
   const seenEdges = new Set();
   for (const [a, b] of snapshot.edges ?? []) {
@@ -218,7 +230,7 @@ export function adaptSkeleton(snapshot, config, enabledSlots = [0, 1, 2, 3]) {
       edges.push([start.joint, end.joint]);
     }
   }
-  return { observations, edges, notes, error: null };
+  return { observations, edges, colors, notes, error: null };
 }
 
 /**
@@ -251,7 +263,7 @@ export function createFrameCache(capacity = 8) {
 export function reconstructionKey(input) {
   return JSON.stringify([
     input.task, input.annotation, input.config,
-    input.observations, input.edges,
+    input.observations, input.edges, input.colors,
   ]);
 }
 
