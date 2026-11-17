@@ -16,5 +16,7 @@ export async function requestReconstruction(input, sequence, signal) {
   const data = await response.json();
   if (data.sequence !== undefined && data.sequence !== sequence) throw new Error("Mismatched reconstruction sequence.");
   if (!Array.isArray(data.joints)) throw new Error("Invalid reconstruction response.");
-  return { ...data, edges: input.edges };
+  // Geometry stays on the server; the selected source's XML label colours
+  // are applied only to the local 3D renderer (never sent as observations).
+  return { ...data, edges: input.edges, colors: input.colors };
 }
