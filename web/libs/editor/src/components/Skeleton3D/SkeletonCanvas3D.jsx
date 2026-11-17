@@ -239,6 +239,29 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
     }
   });
 
+  // Optional foot diagnostic. This is a numerical annotation, NOT a bone:
+  // it never modifies 3D topology and appears only for reconstructed foot
+  // landmarks with a finite measurement supplied by the backend.
+  if (options.labels) {
+    for (const [side, prefix] of [["left", "l"], ["right", "r"]]) {
+      const angle = data.foot_tilt?.[side];
+      if (!Number.isFinite(angle)) continue;
+      const foot = ["heel", "big_toe", "small_toe"].map((part) => projected.get(prefix + "_" + part));
+      if (foot.some((p) => !p)) continue;
+      const x = foot.reduce((sum, p) => sum + p.x, 0) / foot.length;
+      const y = foot.reduce((sum, p) => sum + p.y, 0) / foot.length;
+      const label = `${side === "left" ? "L" : "R"} forefoot tilt: ${angle >= 0 ? "+" : "−"}${Math.abs(angle).toFixed(1)}°`;
+      ctx.font = "600 12px system-ui, sans-serif";
+      const labelWidth = ctx.measureText(label).width;
+      const atX = Math.max(8, Math.min(w - labelWidth - 10, x - labelWidth / 2));
+      const atY = Math.max(20, Math.min(h - 10, y + 30));
+      ctx.fillStyle = "rgba(248,250,252,0.9)";
+      ctx.fillRect(atX - 4, atY - 13, labelWidth + 8, 19);
+      ctx.fillStyle = colorOf(prefix + "_heel", configuredColors[prefix + "_heel"]);
+      ctx.fillText(label, atX, atY);
+    }
+  }
+
   // The hit-test uses the same projection as the canvas renderer.
   const hitTargets = [...projected].map(([joint, p]) => ({ joint, x: p.x, y: p.y }));
 
