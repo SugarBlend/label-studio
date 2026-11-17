@@ -3,8 +3,9 @@
  * No bones or links are inferred from a predefined pose schema.
  * Bone geometry comes exclusively from the selected source's Relations.
  */
-// Colours are assigned deterministically to arbitrary joint names.
-const JOINT_PALETTE = ["#159ee8", "#ed7929", "#b26ad8", "#26a269", "#e85070", "#b38b2e"];
+// Colour describes the side of a bone, NOT the skeleton's topology.
+export const LEFT = "#159ee8";
+export const RIGHT = "#ed7929";
 
 // Stable per-camera palette used by the camera markers, 3D observation rays
 // and 2D epipolar curves. Colour represents the SOURCE camera, not the joint.
@@ -30,12 +31,30 @@ export function uniqueRelationEdges(relations = [], presentJoints = new Set()) {
   return [...unique.values()];
 }
 
-export const colorOf = (joint) => {
-  const name = String(joint ?? "");
-  if (!name) return BONE;
-  let hash = 2166136261;
-  for (let i = 0; i < name.length; i++) {
-    hash = Math.imul(hash ^ name.charCodeAt(i), 16777619);
-  }
-  return JOINT_PALETTE[(hash >>> 0) % JOINT_PALETTE.length];
+/**
+ * Side from an optional joint-name prefix. Unknown names stay neutral:
+ * no fixed HALPE/COCO schema or predeclared set of joints is required.
+ */
+export const sideOf = (joint) => {
+  const name = String(joint ?? "").trim().toLowerCase();
+  if (/^(left|l)[_\s-]/.test(name)) return "left";
+  if (/^(right|r)[_\s-]/.test(name)) return "right";
+  return null;
+};
+
+export const colorOf = (joint) =>
+  sideOf(joint) === "left" ? LEFT : sideOf(joint) === "right" ? RIGHT : BONE;
+
+/**
+ * A neutral/central endpoint inherits the other endpoint's side.
+ * A left-right cross-body link and a neutral-neutral link are gray.
+ * Both 2D and 3D use this identical rule; Relations alone define edges.
+ */
+export const boneColorOf = (from, to) => {
+  const a = sideOf(from);
+  const b = sideOf(to);
+  if (a && b && a !== b) return BONE;
+  return a === "left" || b === "left" ? LEFT
+    : a === "right" || b === "right" ? RIGHT
+      : BONE;
 };
