@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BONE, cameraColorOf, colorOf, uniqueRelationEdges } from "./topology";
+import { BONE, boneColorOf, cameraColorOf, colorOf, uniqueRelationEdges } from "./topology";
 import { hasHighReprojectionError } from "./reprojectionQuality";
 
 const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -185,7 +185,7 @@ function draw3D(canvas, data, config, view, options, history, selectedJoint) {
 
   const drawBone = ([a, b]) => {
     const ap = projected.get(a), bp = projected.get(b);
-    const palette = colorOf(a);
+    const palette = boneColorOf(a, b);
     const color = options.colour === "neutral" ? BONE : palette;
     const thick = Math.max(2.1, 4.7 * options.size * Math.min(1.5, ((ap.magnification + bp.magnification) / 2) * radius / h));
     const hasWarning = highErrorNames.has(a) || highErrorNames.has(b);
@@ -320,7 +320,7 @@ export function SkeletonCanvas3D({
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 7, padding: "7px 4px", fontSize: 12, background: "#fff" }}>
         <label>Colour{" "}
           <select value={options.colour} onChange={(e) => setOptions((old) => ({ ...old, colour: e.target.value }))}>
-            <option value="body">By joint</option><option value="neutral">Neutral</option>
+            <option value="body">Body side</option><option value="neutral">Neutral</option>
           </select>
         </label>
         <label>Size{" "}
