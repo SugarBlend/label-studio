@@ -9,6 +9,9 @@ import { getReprojectionWarnings } from "./reprojectionQuality";
 import { cn } from "../../utils/bem";
 
 
+const formatFootTilt = (value) =>
+  Number.isFinite(value) ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)}°` : "—";
+
 const PANEL_KEY = "ls.skeleton3d.panel";
 const readPanelState = () => {
   try {
@@ -258,6 +261,11 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({
   // Every successfully triangulated joint remains visible, regardless of RMS.
   // Backend-rejected (nontriangulable) joints have no valid 3D position.
   const safeData = data;
+  // Optional foot measurement: never require a foot-specific skeleton schema
+  // for 3D reconstruction or Relation-based bone visualization.
+  const leftFootTilt = safeData?.foot_tilt?.left;
+  const rightFootTilt = safeData?.foot_tilt?.right;
+  const hasFootTilt = Number.isFinite(leftFootTilt) || Number.isFinite(rightFootTilt);
   const warnings = [
     ...(state.notes ?? []),
     ...(data?.warnings ?? []).map((w) => (typeof w === "string" ? w : JSON.stringify(w))),
@@ -348,6 +356,13 @@ export const Skeleton3D = React.forwardRef(function Skeleton3D({
               {state.error ? ` · ${state.error}` : ""}
               {state.stale && " · Previous pose remains visible until the current frame is ready."}
             </div>
+            {hasFootTilt && (
+              <div data-testid="skeleton3d-foot-tilt"
+                style={{ marginBottom: 9, fontSize: 12, fontWeight: 600, color: "#334155" }}>
+                Forefoot tilt: L {formatFootTilt(leftFootTilt)} · R {formatFootTilt(rightFootTilt)}
+                {state.stale ? " (previous frame)" : ""}
+              </div>
+            )}
           <fieldset style={{
             margin: "0 0 10px", border: "1px solid #dbe3ef", borderRadius: 6,
             padding: "7px 9px", minWidth: 0,
