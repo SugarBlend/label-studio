@@ -3,8 +3,8 @@
  * No bones or links are inferred from a predefined pose schema.
  * Bone geometry comes exclusively from the selected source's Relations.
  */
-export const LEFT = "#159ee8";
-export const RIGHT = "#ed7929";
+// Colours are assigned deterministically to arbitrary joint names.
+const JOINT_PALETTE = ["#159ee8", "#ed7929", "#b26ad8", "#26a269", "#e85070", "#b38b2e"];
 
 // Stable per-camera palette used by the camera markers, 3D observation rays
 // and 2D epipolar curves. Colour represents the SOURCE camera, not the joint.
@@ -30,5 +30,12 @@ export function uniqueRelationEdges(relations = [], presentJoints = new Set()) {
   return [...unique.values()];
 }
 
-export const sideOf = (joint) => joint.startsWith("l_") ? "l" : joint.startsWith("r_") ? "r" : "";
-export const colorOf = (joint) => sideOf(joint) === "l" ? LEFT : sideOf(joint) === "r" ? RIGHT : BONE;
+export const colorOf = (joint) => {
+  const name = String(joint ?? "");
+  if (!name) return BONE;
+  let hash = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    hash = Math.imul(hash ^ name.charCodeAt(i), 16777619);
+  }
+  return JOINT_PALETTE[(hash >>> 0) % JOINT_PALETTE.length];
+};
