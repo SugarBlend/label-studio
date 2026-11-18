@@ -1522,6 +1522,9 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
       {/* Skeleton connections are above detector boxes, but below the
           keypoints themselves; never take part in pointer hit testing. */}
       <SkeletonRelationsLayer item={item} />
+      {/* Keep reprojection diagnostics below editable keypoints and selection
+          handles. This layer is read-only and does not intercept pointer events. */}
+      <ReprojectionLayer item={item} />
       {/* Keep box transform handles functional, but do not let the selected
           box or its Transformer steal clicks from actual keypoint circles. */}
       <Selection item={item} isPanning={state.isPanning} />
@@ -1540,9 +1543,6 @@ const StageContent = observer(({ item, store, state, crosshairRef }) => {
           smoothing={item.smoothingEnabled}
         />
       )}
-      {/* Diagnostic overlays stay visible above the keypoints, but are
-          noninteractive and therefore cannot intercept selection or drag. */}
-      <ReprojectionLayer item={item} />
       <DrawingRegion item={item} />
       {item.smoothingEnabled === false && <PixelGridLayer item={item} />}
 
