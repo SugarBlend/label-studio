@@ -152,7 +152,6 @@ export const ReprojectionLayer = observer(({ item }) => {
               stroke={cameraColorOf(ray.source_slot)}
               strokeWidth={1.8}
               opacity={0.75}
-              dash={[7, 5]}
               lineCap="round"
               strokeScaleEnabled={false}
               perfectDrawEnabled={false}
