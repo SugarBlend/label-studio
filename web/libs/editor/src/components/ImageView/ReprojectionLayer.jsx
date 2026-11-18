@@ -223,7 +223,6 @@ export const ReprojectionLayer = observer(({ item }) => {
           radius={radius}
           stroke={color}
           strokeWidth={2}
-          dash={[3, 3]}
           fillEnabled={false}
           strokeScaleEnabled={false}
           perfectDrawEnabled={false}
